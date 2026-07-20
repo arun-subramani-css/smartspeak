@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, FileVideo, AlertCircle, ShieldCheck, Film, CheckCircle2, X, Loader2, ArrowRight } from 'lucide-react';
+import { Upload, FileVideo, AlertCircle, Shield, Film, Waves, CheckCircle2, X, Loader2, ArrowRight } from 'lucide-react';
 
 const MAX_SIZE_MB = 500;
 const ALLOWED_EXTENSIONS = ['.mp4', '.avi', '.mov'];
@@ -112,7 +112,7 @@ export function VideoUploader({ onUploadSuccess }) {
           const res = JSON.parse(xhr.responseText);
           setErrorMessage(res.detail || `Upload rejected (HTTP ${xhr.status})`);
         } catch (e) {
-          setErrorMessage(`Upload failed with status code ${xhr.status}: ${xhr.statusText}`);
+          setErrorMessage(`Upload failed with status code ${xhr.status}`);
         }
       }
     };
@@ -136,23 +136,20 @@ export function VideoUploader({ onUploadSuccess }) {
 
   return (
     <div className="pro-card">
+      {/* Header Row */}
       <div className="pro-card-header">
         <div>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffffff' }}>
-            Presentation Video Ingestion
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+            Video Ingestion
           </h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            Upload presentation recording for automated audio extraction and video frame sampling
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+            Automated extraction & sampling pipeline
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '8px' }}>
-          <span className="status-pill" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}>
-            Max 500 MB
-          </span>
-          <span className="status-pill" style={{ background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary-400)', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
-            .MP4 / .AVI / .MOV
-          </span>
+          <span className="badge-pill">MAX 500 MB</span>
+          <span className="badge-pill">.MP4 / .AVI / .MOV</span>
         </div>
       </div>
 
@@ -166,10 +163,10 @@ export function VideoUploader({ onUploadSuccess }) {
           style={{ display: 'none' }}
         />
 
-        {/* Dropzone Area */}
+        {/* Dropzone */}
         {!selectedFile ? (
           <div
-            className={`pro-dropzone ${dragActive ? 'active' : ''}`}
+            className={`exact-dropzone ${dragActive ? 'active' : ''}`}
             onDragEnter={handleDrag}
             onDragOver={handleDrag}
             onDragLeave={handleDrag}
@@ -180,88 +177,70 @@ export function VideoUploader({ onUploadSuccess }) {
               width: '56px',
               height: '56px',
               borderRadius: '50%',
-              background: 'rgba(99, 102, 241, 0.12)',
+              background: 'var(--primary-purple-light)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 16px',
-              color: 'var(--primary-400)',
-              border: '1px solid rgba(99, 102, 241, 0.3)'
+              color: 'var(--primary-purple)'
             }}>
-              <UploadCloud size={28} />
+              <Upload size={26} />
             </div>
-            
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
-              Drag & drop video recording here, or <span style={{ color: 'var(--primary-400)', textDecoration: 'underline', cursor: 'pointer' }}>browse files</span>
+
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
+              Drag and drop video recording here
             </h3>
 
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', maxWidth: '440px', margin: '0 auto 16px' }}>
-              Automated container validation verifies MP4/AVI/MOV binary headers upon stream.
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+              or <span style={{ color: 'var(--primary-purple)', fontWeight: 700 }}>browse files</span> to select manually
             </p>
-
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <ShieldCheck size={14} color="var(--accent-emerald)" /> Container Validated
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Film size={14} color="var(--accent-cyan)" /> 1 FPS OpenCV Frame Sampling
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <CheckCircle2 size={14} color="var(--primary-400)" /> 16kHz Mono WAV Audio
-              </span>
-            </div>
           </div>
         ) : (
           <div style={{
-            background: 'var(--bg-surface-elevated)',
+            background: 'var(--bg-subtle)',
             border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-lg)',
-            padding: '24px'
+            padding: '20px'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                 <div style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '12px',
-                  background: 'rgba(99, 102, 241, 0.15)',
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '10px',
+                  background: 'var(--primary-purple-light)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: 'var(--primary-400)',
-                  border: '1px solid rgba(99, 102, 241, 0.3)'
+                  color: 'var(--primary-purple)'
                 }}>
-                  <FileVideo size={24} />
+                  <FileVideo size={22} />
                 </div>
                 <div>
-                  <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                     {selectedFile.name}
                   </h4>
-                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                     {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB • {selectedFile.type || 'video'}
                   </p>
                 </div>
               </div>
 
               {!isUploading && (
-                <button
-                  onClick={clearSelection}
-                  className="btn-secondary"
-                  style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                >
+                <button onClick={clearSelection} className="btn-light">
                   <X size={16} />
-                  <span>Remove File</span>
+                  <span>Remove</span>
                 </button>
               )}
             </div>
 
-            {/* Upload Progress Bar */}
+            {/* Upload Progress */}
             {isUploading && (
-              <div style={{ marginTop: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '8px', color: 'var(--text-secondary)' }}>
+              <div style={{ marginTop: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '6px', color: 'var(--text-secondary)' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Loader2 size={16} className="animate-spin" color="var(--primary-400)" />
-                    Uploading stream to staging storage...
+                    <Loader2 size={16} className="animate-spin" color="var(--primary-purple)" />
+                    Uploading video stream...
                   </span>
                   <strong style={{ color: 'var(--text-primary)' }}>{uploadProgress}%</strong>
                 </div>
@@ -271,39 +250,64 @@ export function VideoUploader({ onUploadSuccess }) {
               </div>
             )}
 
-            {/* Action CTA */}
             {!isUploading && (
-              <button
-                className="btn-primary"
-                onClick={handleUpload}
-                style={{ width: '100%', padding: '14px', marginTop: '16px' }}
-              >
-                <span>Initiate Preprocessing Pipeline</span>
+              <button className="btn-purple" onClick={handleUpload} style={{ width: '100%', padding: '14px', marginTop: '12px' }}>
+                <span>Start Preprocessing Pipeline</span>
                 <ArrowRight size={18} />
               </button>
             )}
           </div>
         )}
 
-        {/* Error Alert Banner */}
+        {/* 3 Info Boxes at Card Bottom */}
+        <div style={{ display: 'flex', gap: '16px', marginTop: '20px' }}>
+          <div className="info-box">
+            <div className="info-box-icon">
+              <Shield size={20} />
+            </div>
+            <div>
+              <div className="info-box-title">Validated</div>
+              <div className="info-box-sub">Security scanning</div>
+            </div>
+          </div>
+
+          <div className="info-box">
+            <div className="info-box-icon">
+              <Film size={20} />
+            </div>
+            <div>
+              <div className="info-box-title">1 FPS Sampling</div>
+              <div className="info-box-sub">Posture analysis</div>
+            </div>
+          </div>
+
+          <div className="info-box">
+            <div className="info-box-icon">
+              <Waves size={20} />
+            </div>
+            <div>
+              <div className="info-box-title">16kHz Mono</div>
+              <div className="info-box-sub">Whisper audio</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Error Message */}
         {errorMessage && (
           <div style={{
-            marginTop: '20px',
-            padding: '14px 18px',
-            background: 'var(--status-danger-bg)',
-            border: '1px solid var(--status-danger-border)',
+            marginTop: '16px',
+            padding: '12px 16px',
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
             borderRadius: 'var(--radius-md)',
-            color: 'var(--status-danger)',
+            color: '#dc2626',
             display: 'flex',
-            alignItems: 'flex-start',
-            gap: '12px',
+            alignItems: 'center',
+            gap: '10px',
             fontSize: '0.875rem'
           }}>
-            <AlertCircle size={20} style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>
-              <strong style={{ display: 'block', fontWeight: 600, marginBottom: '2px' }}>Upload Error</strong>
-              <span>{errorMessage}</span>
-            </div>
+            <AlertCircle size={18} style={{ flexShrink: 0 }} />
+            <span>{errorMessage}</span>
           </div>
         )}
       </div>
