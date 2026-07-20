@@ -1,53 +1,83 @@
 import React from 'react';
-import { Mic, Sparkles } from 'lucide-react';
+import { Mic, Activity, ExternalLink, ShieldCheck, Layers } from 'lucide-react';
 
 export function Header() {
   return (
     <header style={{
-      borderBottom: '1px solid var(--border-color)',
-      background: 'rgba(9, 13, 22, 0.8)',
-      backdropFilter: 'blur(12px)',
+      borderBottom: '1px solid var(--border-subtle)',
+      background: 'rgba(11, 15, 23, 0.85)',
+      backdropFilter: 'blur(16px)',
       position: 'sticky',
       top: 0,
       zIndex: 50,
-      padding: '16px 0'
+      padding: '14px 0'
     }}>
-      <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div className="max-w-screen" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        {/* Brand */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <div style={{
-            background: 'linear-gradient(135deg, var(--primary), var(--accent-purple))',
+            background: 'linear-gradient(135deg, var(--primary-600), var(--accent-violet))',
             padding: '10px',
             borderRadius: '12px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 4px 15px var(--primary-glow)'
+            boxShadow: '0 4px 14px var(--primary-glow)'
           }}>
-            <Mic size={24} color="#ffffff" />
+            <Mic size={22} color="#ffffff" />
           </div>
           <div>
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.5px' }}>
-              Smart<span className="gradient-text">Speak</span>
-            </h1>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              AI Public Speaking Coach — Video Preprocessing Pipeline
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h1 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
+                Smart<span style={{ color: 'var(--primary-400)' }}>Speak</span>
+              </h1>
+              <span style={{
+                background: 'rgba(99, 102, 241, 0.15)',
+                color: 'var(--primary-400)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: '999px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em'
+              }}>
+                Enterprise AI
+              </span>
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              Video Ingestion & Multimodal Preprocessing Engine
             </p>
           </div>
         </div>
 
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '6px 14px',
-          background: 'rgba(255, 255, 255, 0.05)',
-          borderRadius: '999px',
-          border: '1px solid var(--border-color)',
-          fontSize: '0.85rem',
-          color: 'var(--text-muted)'
-        }}>
-          <Sparkles size={16} color="var(--accent-purple)" />
-          <span>Module 1 & 2 Active</span>
+        {/* Action Badges & API Docs Link */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            background: 'var(--bg-surface-elevated)',
+            borderRadius: 'var(--radius-full)',
+            border: '1px solid var(--border-subtle)',
+            fontSize: '0.78rem',
+            color: 'var(--text-secondary)'
+          }}>
+            <Activity size={14} color="var(--accent-emerald)" />
+            <span>Pipeline Engine: <strong>Active</strong></span>
+          </div>
+
+          <a
+            href="http://localhost:8000/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-secondary"
+            style={{ textDecoration: 'none', padding: '6px 14px', fontSize: '0.8rem' }}
+          >
+            <span>API Docs</span>
+            <ExternalLink size={14} />
+          </a>
         </div>
       </div>
     </header>
