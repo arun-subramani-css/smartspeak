@@ -9,6 +9,7 @@ import cv2
 from app.config import settings
 from app.db.mongodb import MongoDB
 from app.models.session import SessionStatus
+from app.services.speech_analyzer import process_speech_analysis_session
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,32 @@ def get_ffmpeg_binary() -> str:
     return "ffmpeg"
 
 
+def _handle_speech_task_completion(task: asyncio.Task, session_id: str):
+    """
+    Done callback for auto-chained speech analysis background task.
+    Catches unhandled exceptions and updates MongoDB status to 'failed' to prevent silent hangs.
+    """
+    try:
+        task.result()
+    except Exception as exc:
+        err_msg = f"Auto-chained speech analysis failed: {str(exc)}"
+        logger.exception(f"[{session_id}] {err_msg}")
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                MongoDB.get_collection("sessions").update_one(
+                    {"session_id": session_id},
+                    {"$set": {"status": SessionStatus.FAILED, "error_reason": err_msg}}
+                )
+            )
+        except Exception as e:
+            logger.error(f"[{session_id}] Failed to set DB status to failed: {e}")
+
+
 async def process_video_session(session_id: str) -> bool:
     """
     Background worker task to extract audio (16kHz mono WAV) and video frames (1 fps) for a session.
-    Updates MongoDB session document with progress and completion status.
+    Upon completion, auto-chains into speech analysis.
     """
     sessions_col = MongoDB.get_collection("sessions")
 
@@ -50,14 +73,12 @@ async def process_video_session(session_id: str) -> bool:
     try:
         staging_file = Path(session_doc.get("file_path", ""))
         if not staging_file.exists():
-            # Try searching in staging directory by session_id prefix
             matches = list(settings.staging_dir.glob(f"{session_id}.*"))
             if matches:
                 staging_file = matches[0]
             else:
                 raise FileNotFoundError(f"Staged video file for session '{session_id}' not found.")
 
-        # Create output directory structure: /processed/{session_id}/
         session_processed_dir = settings.processed_dir / session_id
         frames_dir = session_processed_dir / "frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
@@ -102,7 +123,6 @@ async def process_video_session(session_id: str) -> bool:
             cap.release()
             raise ValueError("Corrupted video file: invalid frame rate or frame count.")
 
-        # Calculate sampling step (frames to skip per saved frame)
         sample_rate = max(0.1, settings.FRAME_SAMPLE_RATE_FPS)
         step = max(1, int(round(fps / sample_rate)))
 
@@ -129,9 +149,8 @@ async def process_video_session(session_id: str) -> bool:
         if saved_count == 0:
             raise ValueError("No frames could be extracted from video.")
 
-        logger.info(f"[{session_id}] Successfully extracted {saved_count} frames and audio track.")
+        logger.info(f"[{session_id}] Audio & frame extraction completed. Updating DB and auto-chaining speech analysis...")
 
-        # Step 3: Update session status to PROCESSED in MongoDB
         now = datetime.now(timezone.utc)
         await sessions_col.update_one(
             {"session_id": session_id},
@@ -145,6 +164,11 @@ async def process_video_session(session_id: str) -> bool:
                 }
             }
         )
+
+        # Auto-chain Speech Analysis as background task with done-callback error handling
+        speech_task = asyncio.create_task(process_speech_analysis_session(session_id))
+        speech_task.add_done_callback(lambda t: _handle_speech_task_completion(t, session_id))
+
         return True
 
     except Exception as exc:

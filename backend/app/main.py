@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.db.mongodb import MongoDB
-from app.routers import sessions, upload
+from app.routers import sessions, speech_analysis, upload
 from app.services.retention import start_retention_scheduler, stop_retention_scheduler
 
 # Configure logging
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="SmartSpeak API",
-    description="Backend services for SmartSpeak - AI-powered public speaking coach (Video Upload & Audio/Video Processing modules).",
+    description="Backend services for SmartSpeak - AI-powered public speaking coach (Video Ingestion, Frame/Audio Processing, and Speech Analysis).",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -70,6 +70,7 @@ app.mount("/data", StaticFiles(directory=str(settings.base_storage_path)), name=
 # Include API routers
 app.include_router(upload.router)
 app.include_router(sessions.router)
+app.include_router(speech_analysis.router)
 
 
 @app.get("/")

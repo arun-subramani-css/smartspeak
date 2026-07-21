@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
+    # Speech Analysis Configuration
+    WHISPER_MODEL: str = "base"
+    FILLER_WORDS: list[str] = ["um", "uh", "like", "you know", "actually", "basically"]
+    LONG_PAUSE_THRESHOLD_SECONDS: float = 3.0
+    WPM_WINDOW_SECONDS: float = 15.0
+    WPM_WINDOW_STEP_SECONDS: float = 5.0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
