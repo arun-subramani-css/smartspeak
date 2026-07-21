@@ -20,8 +20,23 @@ from app.models.session import (
 
 logger = logging.getLogger(__name__)
 
-# Global cached Whisper model instance to avoid re-loading weights on every call
+# Global cached instances to avoid re-loading weights on every call
 _whisper_model_cache = {}
+_spacy_nlp_cache = None
+
+
+def get_spacy_nlp():
+    """Load and cache spaCy English model for POS-tagging."""
+    global _spacy_nlp_cache
+    if _spacy_nlp_cache is None:
+        try:
+            import spacy
+            _spacy_nlp_cache = spacy.load("en_core_web_sm")
+            logger.info("spaCy 'en_core_web_sm' model loaded into memory.")
+        except Exception as e:
+            logger.warning(f"Could not load spaCy model en_core_web_sm: {e}")
+            _spacy_nlp_cache = False
+    return _spacy_nlp_cache if _spacy_nlp_cache is not False else None
 
 
 def _get_whisper_model(model_name: str):
@@ -44,6 +59,51 @@ def clean_text(word: str) -> str:
     return re.sub(r"[^\w\s']", "", word.strip()).lower()
 
 
+def classify_filler_context(word_text: str, pos_tag: str, surrounding_text: str = "") -> bool:
+    """
+    Determines if a contextual word ("like", "actually", "basically", "you know")
+    is acting as a filler word or as a legitimate grammatical part of speech.
+    - ALWAYS_FILLER ("um", "uh") skip this check and always return True.
+    - "like": Flagged ONLY when NOT a verb (VERB) or preposition (ADP/SCONJ).
+    - "actually" / "basically": Flagged ONLY when standalone sentence openers or set off by commas.
+    """
+    word_clean = clean_text(word_text)
+    always_set = {clean_text(w) for w in settings.ALWAYS_FILLER}
+
+    # ALWAYS_FILLER words always flag, no exceptions
+    if word_clean in always_set:
+        return True
+
+    pos_upper = pos_tag.upper() if pos_tag else ""
+
+    if word_clean == "like":
+        # Do NOT flag "like" if it's used as a verb ("I like your project") or preposition ("looks like a cat")
+        if pos_upper in ["VERB", "ADP", "SCONJ"]:
+            return False
+        # Flag if tagged as interjection/discourse marker (INTJ), adverb (ADV), particle (PART), or set off by commas
+        if pos_upper in ["INTJ", "ADV", "PART", "X"]:
+            return True
+        if re.search(r",\s*like\b|\blike\s*,", surrounding_text, re.IGNORECASE):
+            return True
+        # Fallback: if not explicitly a verb or preposition, treat as filler
+        return True
+
+    if word_clean in ["actually", "basically"]:
+        # Flag only when standalone sentence opener or set off by commas, not when integrated grammatically ("that's actually correct")
+        if pos_upper in ["INTJ", "X"]:
+            return True
+        if re.search(r"(?:^|[.!?,\n])\s*(?:actually|basically)\b|\b(?:actually|basically)\s*,", surrounding_text, re.IGNORECASE):
+            return True
+        return False
+
+    if word_clean == "you know":
+        if pos_upper in ["INTJ", "X"] or re.search(r",\s*you know\b|\byou know\s*,", surrounding_text, re.IGNORECASE):
+            return True
+        return True
+
+    return False
+
+
 def transcribe_audio_sync(audio_path: Path, model_name: str) -> Tuple[str, List[WordTimestamp]]:
     """
     Synchronous Whisper transcription returning full text and word-level timestamps.
@@ -54,8 +114,8 @@ def transcribe_audio_sync(audio_path: Path, model_name: str) -> Tuple[str, List[
 
     model = _get_whisper_model(model_name)
 
-    # 1. initial_prompt biases Whisper toward transcribing filler words verbatim (e.g. 'Um', 'uh')
-    # 2. condition_on_previous_text=False prevents Whisper from 'cleaning up' segments based on previous style
+    # initial_prompt biases Whisper toward transcribing filler words verbatim (e.g. 'Um', 'uh')
+    # condition_on_previous_text=False prevents Whisper from 'cleaning up' segments based on previous style
     result = model.transcribe(
         str(audio_path),
         word_timestamps=True,
@@ -85,17 +145,35 @@ def transcribe_audio_sync(audio_path: Path, model_name: str) -> Tuple[str, List[
     return transcript_text, words_data
 
 
-def detect_filler_words(words: List[WordTimestamp], filler_list: List[str]) -> Tuple[List[FillerWordItem], int]:
+def detect_filler_words(words: List[WordTimestamp], filler_list: List[str] = None) -> Tuple[List[FillerWordItem], int]:
     """
     Detects single-word and multi-word filler phrases from word-level timestamps.
-    Normalizes each word by lowercasing and stripping punctuation so 'Um,', 'UM', match 'um'.
+    ALWAYS_FILLER words ('um', 'uh') are always flagged.
+    CONTEXTUAL_FILLER words ('like', 'actually', 'basically', 'you know') use spaCy POS-tagging context rules.
     """
+    if filler_list is None:
+        filler_list = settings.FILLER_WORDS
+
     detected: List[FillerWordItem] = []
     if not words or not filler_list:
         return [], 0
 
-    single_fillers = {clean_text(f) for f in filler_list if " " not in f}
+    always_fillers = {clean_text(f) for f in settings.ALWAYS_FILLER}
+    contextual_fillers = {clean_text(f) for f in settings.CONTEXTUAL_FILLER}
     multi_fillers = [[clean_text(t) for t in f.split()] for f in filler_list if " " in f]
+
+    # Build full transcript sentence and run spaCy POS-tagger if available
+    full_sentence = " ".join(w.word for w in words)
+    nlp = get_spacy_nlp()
+
+    word_pos_map = {}
+    if nlp and full_sentence:
+        try:
+            doc = nlp(full_sentence)
+            for token in doc:
+                word_pos_map[token.i] = token.pos_
+        except Exception as e:
+            logger.warning(f"spaCy POS-tagging error: {e}")
 
     cleaned_words = [clean_text(w.word) for w in words]
     used_indices = set()
@@ -108,29 +186,46 @@ def detect_filler_words(words: List[WordTimestamp], filler_list: List[str]) -> T
             if any(idx in used_indices for idx in range(i, i + phrase_len)):
                 continue
             if cleaned_words[i: i + phrase_len] == phrase_tokens:
-                detected.append(
-                    FillerWordItem(
-                        word=phrase_str,
-                        timestamp=round(words[i].start, 2)
+                pos_tag = word_pos_map.get(i, "")
+                surrounding = " ".join(w.word for w in words[max(0, i-2): min(len(words), i+phrase_len+2)])
+                if classify_filler_context(phrase_str, pos_tag, surrounding):
+                    detected.append(
+                        FillerWordItem(
+                            word=phrase_str,
+                            timestamp=round(words[i].start, 2)
+                        )
                     )
-                )
-                for idx in range(i, i + phrase_len):
-                    used_indices.add(idx)
+                    for idx in range(i, i + phrase_len):
+                        used_indices.add(idx)
 
-    # 2. Detect single-word fillers (e.g. "um", "uh", "like")
+    # 2. Detect single-word fillers (ALWAYS_FILLER and CONTEXTUAL_FILLER)
     for i, w in enumerate(words):
         if i in used_indices:
             continue
         cleaned = cleaned_words[i]
-        if cleaned in single_fillers:
+
+        # ALWAYS_FILLER: Flag immediately without POS check
+        if cleaned in always_fillers:
             detected.append(
                 FillerWordItem(
                     word=cleaned,
                     timestamp=round(w.start, 2)
                 )
             )
+            used_indices.add(i)
+        # CONTEXTUAL_FILLER: Apply POS tag and context classification
+        elif cleaned in contextual_fillers:
+            pos_tag = word_pos_map.get(i, "")
+            surrounding = " ".join(word_obj.word for word_obj in words[max(0, i-2): min(len(words), i+3)])
+            if classify_filler_context(w.word, pos_tag, surrounding):
+                detected.append(
+                    FillerWordItem(
+                        word=cleaned,
+                        timestamp=round(w.start, 2)
+                    )
+                )
+                used_indices.add(i)
 
-    # Sort filler occurrences chronologically by timestamp
     detected.sort(key=lambda item: item.timestamp)
     return detected, len(detected)
 
@@ -139,11 +234,14 @@ def calculate_wpm_data(
     words: List[WordTimestamp],
     window_seconds: float = 15.0,
     step_seconds: float = 5.0,
-    long_pause_threshold: float = 3.0
+    long_pause_threshold: float = None
 ) -> WPMData:
     """
     Calculates overall WPM (excluding long silences) and rolling windowed WPM.
     """
+    if long_pause_threshold is None:
+        long_pause_threshold = settings.LONG_PAUSE_THRESHOLD_SECONDS
+
     total_words = len(words)
     if total_words == 0:
         return WPMData(
@@ -153,7 +251,6 @@ def calculate_wpm_data(
             windowed_wpm=[]
         )
 
-    # Calculate total speaking duration (subtracting long pauses > long_pause_threshold)
     first_start = words[0].start
     last_end = words[-1].end
     raw_duration = max(0.1, last_end - first_start)
@@ -167,7 +264,6 @@ def calculate_wpm_data(
     actual_speaking_duration = max(0.1, raw_duration - long_pauses_total)
     overall_wpm = round((total_words / (actual_speaking_duration / 60.0)), 1)
 
-    # Rolling windowed WPM
     windowed_wpm_list: List[WindowedWPM] = []
     max_time = last_end
 
@@ -193,10 +289,13 @@ def calculate_wpm_data(
     )
 
 
-def detect_long_pauses(words: List[WordTimestamp], threshold: float = 3.0) -> List[PauseItem]:
+def detect_long_pauses(words: List[WordTimestamp], threshold: float = None) -> List[PauseItem]:
     """
-    Detects gaps between consecutive spoken words exceeding the threshold in seconds.
+    Detects gaps between consecutive spoken words exceeding the threshold in seconds (default: 2.0s).
     """
+    if threshold is None:
+        threshold = settings.LONG_PAUSE_THRESHOLD_SECONDS
+
     pauses: List[PauseItem] = []
     if len(words) < 2:
         return pauses
@@ -262,7 +361,6 @@ def detect_repetitions(words: List[WordTimestamp]) -> List[RepetitionItem]:
                 continue
             phrase_str = " ".join(phrase_tokens)
 
-            # Look ahead within 10 seconds for repetition
             window_limit = words[idx].start + 10.0
             next_idx = idx + phrase_length
             while next_idx <= n - phrase_length and words[next_idx].start <= window_limit:
@@ -294,7 +392,6 @@ async def process_speech_analysis_session(session_id: str) -> bool:
         logger.error(f"[{session_id}] Session not found for speech analysis.")
         return False
 
-    # Mark status as processing during speech analysis
     await sessions_col.update_one(
         {"session_id": session_id},
         {"$set": {"status": SessionStatus.PROCESSING}}
@@ -313,7 +410,6 @@ async def process_speech_analysis_session(session_id: str) -> bool:
         logger.info(f"[{session_id}] Running Whisper STT offloaded to thread pool executor...")
         loop = asyncio.get_running_loop()
 
-        # Offload synchronous Whisper transcription to thread pool executor
         transcript_text, words = await loop.run_in_executor(
             None,
             transcribe_audio_sync,
@@ -321,11 +417,9 @@ async def process_speech_analysis_session(session_id: str) -> bool:
             settings.WHISPER_MODEL
         )
 
-        # DEBUG LOGGING: Print raw Whisper transcript and word tokens
         logger.info(f"[{session_id}] Raw Whisper transcript: '{transcript_text}'")
         logger.info(f"[{session_id}] Extracted word tokens ({len(words)}): {[w.word for w in words]}")
 
-        # Run analysis algorithms
         filler_words, filler_count = detect_filler_words(words, settings.FILLER_WORDS)
         wpm_data = calculate_wpm_data(
             words,
@@ -349,7 +443,6 @@ async def process_speech_analysis_session(session_id: str) -> bool:
             analyzed_at=datetime.now(timezone.utc)
         )
 
-        # Overwrite speech_analysis sub-document and update status
         await sessions_col.update_one(
             {"session_id": session_id},
             {

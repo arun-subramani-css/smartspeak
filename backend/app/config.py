@@ -19,8 +19,10 @@ class Settings(BaseSettings):
 
     # Speech Analysis Configuration
     WHISPER_MODEL: str = "base"
+    ALWAYS_FILLER: list[str] = ["um", "uh"]
+    CONTEXTUAL_FILLER: list[str] = ["like", "actually", "basically", "you know"]
     FILLER_WORDS: list[str] = ["um", "uh", "like", "you know", "actually", "basically"]
-    LONG_PAUSE_THRESHOLD_SECONDS: float = 3.0
+    LONG_PAUSE_THRESHOLD_SECONDS: float = 2.0
     WPM_WINDOW_SECONDS: float = 15.0
     WPM_WINDOW_STEP_SECONDS: float = 5.0
 
