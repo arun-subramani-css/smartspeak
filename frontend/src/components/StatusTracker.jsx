@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { 
   RefreshCw, CheckCircle2, Clock, AlertTriangle, Music, Image as ImageIcon, 
-  Copy, Check, FileVideo, ArrowLeft, Volume2, ShieldCheck, Film 
+  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2 
 } from 'lucide-react';
 
 export function StatusTracker({ sessionId, onReset }) {
   const [statusData, setStatusData] = useState(null);
+  const [speechAnalysis, setSpeechAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -19,10 +20,27 @@ export function StatusTracker({ sessionId, onReset }) {
       const data = await res.json();
       setStatusData(data);
       setError(null);
+
+      // If speech analysis is complete or available, fetch analysis data
+      if (data.status === 'speech_analysis_complete' || data.has_speech_analysis) {
+        fetchSpeechAnalysis();
+      }
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSpeechAnalysis = async () => {
+    try {
+      const res = await fetch(`/api/v1/sessions/${sessionId}/speech-analysis`);
+      if (res.ok) {
+        const data = await res.json();
+        setSpeechAnalysis(data.speech_analysis);
+      }
+    } catch (e) {
+      console.error("Failed to fetch speech analysis details:", e);
     }
   };
 
@@ -31,7 +49,7 @@ export function StatusTracker({ sessionId, onReset }) {
 
     fetchStatus();
     const interval = setInterval(() => {
-      if (statusData && (statusData.status === 'processed' || statusData.status === 'failed')) {
+      if (statusData && (statusData.status === 'speech_analysis_complete' || statusData.status === 'failed')) {
         clearInterval(interval);
         return;
       }
@@ -60,7 +78,13 @@ export function StatusTracker({ sessionId, onReset }) {
       case 'processed':
         return (
           <span className="badge-pill" style={{ background: '#ecfdf5', color: '#059669' }}>
-            <CheckCircle2 size={12} /> Pipeline Complete
+            <CheckCircle2 size={12} /> Audio & Frames Processed
+          </span>
+        );
+      case 'speech_analysis_complete':
+        return (
+          <span className="badge-pill" style={{ background: '#f3e8ff', color: '#7c3aed', border: '1px solid #e9d5ff' }}>
+            <Sparkles size={12} /> Speech Analysis Complete
           </span>
         );
       case 'failed':
@@ -81,6 +105,8 @@ export function StatusTracker({ sessionId, onReset }) {
       })
     : [];
 
+  const isProcessedOrAnalyzed = statusData?.status === 'processed' || statusData?.status === 'speech_analysis_complete' || statusData?.has_speech_analysis;
+
   return (
     <div className="pro-card">
       <div className="pro-card-header">
@@ -89,7 +115,7 @@ export function StatusTracker({ sessionId, onReset }) {
             Processing Status & Metrics
           </h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            Real-time pipeline monitoring & extracted artifact preview
+            Real-time pipeline monitoring & speech analysis report
           </p>
         </div>
 
@@ -189,7 +215,7 @@ export function StatusTracker({ sessionId, onReset }) {
               {statusData.status === 'processing' && (
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <RefreshCw size={14} className="animate-spin" color="var(--primary-purple)" />
-                  <span>Processing video frames & audio...</span>
+                  <span>Processing audio extraction & Whisper STT speech analysis...</span>
                 </div>
               )}
             </div>
@@ -209,7 +235,7 @@ export function StatusTracker({ sessionId, onReset }) {
                   <span>Processing Failed</span>
                 </div>
                 <p style={{ fontSize: '0.875rem', color: '#991b1b', marginBottom: '12px' }}>
-                  Reason: {statusData.error_reason || 'Unknown decoding error.'}
+                  Reason: {statusData.error_reason || 'Unknown decoding or speech analysis error.'}
                 </p>
                 <button onClick={onReset} className="btn-light" style={{ background: '#ffffff', borderColor: '#fca5a5' }}>
                   <span>Try Uploading Again</span>
@@ -217,9 +243,9 @@ export function StatusTracker({ sessionId, onReset }) {
               </div>
             )}
 
-            {/* Processed Cards */}
-            {statusData.status === 'processed' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Processed Audio & Frame Cards */}
+            {isProcessedOrAnalyzed && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   {/* Audio Card */}
                   <div style={{
@@ -261,7 +287,7 @@ export function StatusTracker({ sessionId, onReset }) {
                     </div>
 
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                      <p>• Total Frames Extracted: <strong style={{ color: 'var(--primary-purple)' }}>{statusData.frame_count} frames</strong></p>
+                      <p>• Total Frames Extracted: <strong style={{ color: 'var(--primary-purple)' }}>{statusData.frame_count || 0} frames</strong></p>
                       <p>• Output Quality: JPEG format</p>
                     </div>
                   </div>
@@ -291,6 +317,236 @@ export function StatusTracker({ sessionId, onReset }) {
                           <span className="frame-badge">#{String(idx + 1).padStart(4, '0')}</span>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* SPEECH ANALYSIS DASHBOARD RESULTS */}
+                {speechAnalysis && (
+                  <div style={{
+                    borderTop: '2px dashed #e2e8f0',
+                    paddingTop: '28px',
+                    marginTop: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '20px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Sparkles size={20} color="var(--primary-purple)" />
+                        <span>Speech Analysis Insights</span>
+                      </h3>
+                      <span className="badge-purple-hero">Whisper Base STT</span>
+                    </div>
+
+                    {/* Transcript Card */}
+                    <div style={{
+                      background: '#ffffff',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-lg)',
+                      padding: '20px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                        <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <MessageSquare size={18} color="var(--primary-purple)" />
+                          <span>Speech Transcript</span>
+                        </h4>
+                        <span className="badge-pill">
+                          {speechAnalysis.wpm_data?.total_words || 0} Total Words
+                        </span>
+                      </div>
+
+                      <div style={{
+                        background: 'var(--bg-subtle)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '16px',
+                        fontSize: '0.92rem',
+                        lineHeight: 1.6,
+                        color: 'var(--text-primary)',
+                        maxHeight: '180px',
+                        overflowY: 'auto'
+                      }}>
+                        {speechAnalysis.transcript_text ? (
+                          <p>"{speechAnalysis.transcript_text}"</p>
+                        ) : (
+                          <em style={{ color: 'var(--text-muted)' }}>No spoken words detected in audio.</em>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Metrics Grid: Filler Words, WPM, Long Pauses, Repetitions */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                      {/* Filler Words Card */}
+                      <div style={{
+                        background: '#ffffff',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-lg)',
+                        padding: '20px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <AlertOctagon size={18} color="#d97706" />
+                            <span>Filler Words</span>
+                          </h4>
+                          <span className="badge-pill" style={{ background: speechAnalysis.filler_word_count > 0 ? '#fffbebfb' : '#ecfdf5', color: speechAnalysis.filler_word_count > 0 ? '#b45309' : '#059669' }}>
+                            {speechAnalysis.filler_word_count} Detected
+                          </span>
+                        </div>
+
+                        {speechAnalysis.filler_words && speechAnalysis.filler_words.length > 0 ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', maxHeight: '140px', overflowY: 'auto' }}>
+                            {speechAnalysis.filler_words.map((item, idx) => (
+                              <span key={idx} style={{
+                                background: '#fef3c7',
+                                color: '#92400e',
+                                border: '1px solid #fde68a',
+                                padding: '4px 10px',
+                                borderRadius: 'var(--radius-sm)',
+                                fontSize: '0.78rem',
+                                fontWeight: 600
+                              }}>
+                                "{item.word}" @ {item.timestamp}s
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                            No filler words ("um", "uh", "like", "you know") detected. Great fluency!
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Speaking Speed WPM Card */}
+                      <div style={{
+                        background: '#ffffff',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-lg)',
+                        padding: '20px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Gauge size={18} color="var(--primary-purple)" />
+                            <span>Speaking Speed (WPM)</span>
+                          </h4>
+                          <strong style={{ fontSize: '1.1rem', color: 'var(--primary-purple)' }}>
+                            {speechAnalysis.wpm_data?.overall_wpm || 0} WPM
+                          </strong>
+                        </div>
+
+                        <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                          <span>Speaking Duration: <strong>{speechAnalysis.wpm_data?.total_speaking_duration_seconds || 0}s</strong></span>
+                        </div>
+
+                        {/* Windowed WPM Timeline Bars */}
+                        {speechAnalysis.wpm_data?.windowed_wpm && speechAnalysis.wpm_data.windowed_wpm.length > 0 && (
+                          <div>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px', fontWeight: 700, textTransform: 'uppercase' }}>
+                              Rolling 15s WPM Pacing
+                            </span>
+                            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+                              {speechAnalysis.wpm_data.windowed_wpm.map((win, idx) => (
+                                <div key={idx} style={{
+                                  background: 'var(--bg-subtle)',
+                                  border: '1px solid var(--border-subtle)',
+                                  padding: '4px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.72rem',
+                                  textAlign: 'center',
+                                  flexShrink: 0
+                                }}>
+                                  <div style={{ fontWeight: 700, color: 'var(--primary-purple)' }}>{win.wpm}</div>
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>{win.window_start}s-{win.window_end}s</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Long Pauses Card */}
+                      <div style={{
+                        background: '#ffffff',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-lg)',
+                        padding: '20px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Clock size={18} color="#2563eb" />
+                            <span>Long Pauses ($\ge 3$s)</span>
+                          </h4>
+                          <span className="badge-pill">
+                            {speechAnalysis.long_pauses?.length || 0} Pauses
+                          </span>
+                        </div>
+
+                        {speechAnalysis.long_pauses && speechAnalysis.long_pauses.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
+                            {speechAnalysis.long_pauses.map((pause, idx) => (
+                              <div key={idx} style={{
+                                background: '#eff6ff',
+                                border: '1px solid #bfdbfe',
+                                color: '#1e40af',
+                                padding: '6px 12px',
+                                borderRadius: 'var(--radius-sm)',
+                                fontSize: '0.8rem',
+                                display: 'flex',
+                                justifyContent: 'space-between'
+                              }}>
+                                <span>Gap: {pause.start_time}s ➔ {pause.end_time}s</span>
+                                <strong>{pause.duration}s pause</strong>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                            No long pauses ($\ge 3.0$ seconds) detected. Good speech flow!
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Repetitions Card */}
+                      <div style={{
+                        background: '#ffffff',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-lg)',
+                        padding: '20px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Repeat size={18} color="#7c3aed" />
+                            <span>Repetitions</span>
+                          </h4>
+                          <span className="badge-pill">
+                            {speechAnalysis.repetitions?.length || 0} Detected
+                          </span>
+                        </div>
+
+                        {speechAnalysis.repetitions && speechAnalysis.repetitions.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
+                            {speechAnalysis.repetitions.map((rep, idx) => (
+                              <div key={idx} style={{
+                                background: '#f3e8ff',
+                                border: '1px solid #e9d5ff',
+                                color: '#6b21a8',
+                                padding: '6px 12px',
+                                borderRadius: 'var(--radius-sm)',
+                                fontSize: '0.8rem',
+                                display: 'flex',
+                                justifyContent: 'space-between'
+                              }}>
+                                <span>"{rep.phrase}"</span>
+                                <span>@{rep.timestamp}s ({rep.count}x)</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                            No word or phrase repetitions detected.
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
