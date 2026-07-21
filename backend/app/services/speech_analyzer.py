@@ -29,6 +29,7 @@ def _get_whisper_model(model_name: str):
     ENGINE TRADEOFF NOTE:
     - openai-whisper: Official PyTorch implementation by OpenAI. Highly reliable, standard, cross-platform.
     - faster-whisper: CTranslate2 re-implementation. Up to 4x faster and uses ~50% less memory.
+      (Note: If faster-whisper is used, set vad_filter=False or min_silence_duration_ms=1000 to avoid stripping short filler bursts like 'um').
     We use openai-whisper with model size specified by settings.WHISPER_MODEL (default: 'base').
     """
     if model_name not in _whisper_model_cache:
@@ -40,19 +41,27 @@ def _get_whisper_model(model_name: str):
 
 def clean_text(word: str) -> str:
     """Normalize word text by stripping punctuation and converting to lowercase."""
-    return re.sub(r"[^\w\s']", "", word.strip().lower())
+    return re.sub(r"[^\w\s']", "", word.strip()).lower()
 
 
 def transcribe_audio_sync(audio_path: Path, model_name: str) -> Tuple[str, List[WordTimestamp]]:
     """
     Synchronous Whisper transcription returning full text and word-level timestamps.
-    Handles silent or music-only audio files gracefully.
+    Biases transcription toward filler words verbatim using initial_prompt and condition_on_previous_text=False.
     """
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found at {audio_path}")
 
     model = _get_whisper_model(model_name)
-    result = model.transcribe(str(audio_path), word_timestamps=True)
+
+    # 1. initial_prompt biases Whisper toward transcribing filler words verbatim (e.g. 'Um', 'uh')
+    # 2. condition_on_previous_text=False prevents Whisper from 'cleaning up' segments based on previous style
+    result = model.transcribe(
+        str(audio_path),
+        word_timestamps=True,
+        initial_prompt="Um, uh, so, like, you know, basically...",
+        condition_on_previous_text=False
+    )
 
     transcript_text = result.get("text", "").strip()
     words_data: List[WordTimestamp] = []
@@ -79,13 +88,14 @@ def transcribe_audio_sync(audio_path: Path, model_name: str) -> Tuple[str, List[
 def detect_filler_words(words: List[WordTimestamp], filler_list: List[str]) -> Tuple[List[FillerWordItem], int]:
     """
     Detects single-word and multi-word filler phrases from word-level timestamps.
+    Normalizes each word by lowercasing and stripping punctuation so 'Um,', 'UM', match 'um'.
     """
     detected: List[FillerWordItem] = []
     if not words or not filler_list:
         return [], 0
 
-    single_fillers = {f.lower() for f in filler_list if " " not in f}
-    multi_fillers = [f.lower().split() for f in filler_list if " " in f]
+    single_fillers = {clean_text(f) for f in filler_list if " " not in f}
+    multi_fillers = [[clean_text(t) for t in f.split()] for f in filler_list if " " in f]
 
     cleaned_words = [clean_text(w.word) for w in words]
     used_indices = set()
@@ -311,7 +321,9 @@ async def process_speech_analysis_session(session_id: str) -> bool:
             settings.WHISPER_MODEL
         )
 
-        logger.info(f"[{session_id}] Whisper transcription completed ({len(words)} words transcribed).")
+        # DEBUG LOGGING: Print raw Whisper transcript and word tokens
+        logger.info(f"[{session_id}] Raw Whisper transcript: '{transcript_text}'")
+        logger.info(f"[{session_id}] Extracted word tokens ({len(words)}): {[w.word for w in words]}")
 
         # Run analysis algorithms
         filler_words, filler_count = detect_filler_words(words, settings.FILLER_WORDS)
@@ -323,6 +335,8 @@ async def process_speech_analysis_session(session_id: str) -> bool:
         )
         long_pauses = detect_long_pauses(words, threshold=settings.LONG_PAUSE_THRESHOLD_SECONDS)
         repetitions = detect_repetitions(words)
+
+        logger.info(f"[{session_id}] Filler detection result: {filler_count} fillers found -> {[f.model_dump() for f in filler_words]}")
 
         analysis_result = SpeechAnalysisResult(
             transcript_text=transcript_text,
