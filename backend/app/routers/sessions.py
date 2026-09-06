@@ -22,7 +22,8 @@ async def get_session_status(session_id: str):
             detail=f"Session with ID '{session_id}' was not found."
         )
 
-    has_analysis = "speech_analysis" in session and session["speech_analysis"] is not None
+    has_speech = "speech_analysis" in session and session["speech_analysis"] is not None
+    has_visual = "visual_analysis" in session and session["visual_analysis"] is not None
 
     return StatusResponse(
         session_id=session["session_id"],
@@ -35,5 +36,6 @@ async def get_session_status(session_id: str):
         processed_at=session.get("processed_at"),
         audio_path=session.get("audio_path"),
         frame_count=session.get("frame_count"),
-        has_speech_analysis=has_analysis
+        has_speech_analysis=has_speech,
+        has_visual_analysis=has_visual
     )

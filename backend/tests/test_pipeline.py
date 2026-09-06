@@ -48,7 +48,11 @@ class MockMongoDBCollection:
 @pytest.fixture(autouse=True)
 def mock_mongodb(monkeypatch):
     mock_col = MockMongoDBCollection()
+    monkeypatch.setattr("app.db.database.Database.get_collection", lambda name="sessions": mock_col)
     monkeypatch.setattr(MongoDB, "get_collection", lambda name="sessions": mock_col)
+    async def mock_connect():
+        pass
+    monkeypatch.setattr("app.db.database.Database.connect", mock_connect)
     return mock_col
 
 

@@ -54,42 +54,55 @@ SmartSpeak is an AI-powered public speaking coach. This repository contains:
 
 ---
 
+## Environment Setup & MongoDB Configuration
+
+Create a `.env` file in the `backend` root with your own `MONGODB_URI` — see `.env.example` for the format. **Never commit your `.env` file.**
+
+```env
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster-url>/?appName=<app>
+MONGODB_DB_NAME=smartspeak
+```
+
+---
+
+## Visual Analysis Pipeline (`/backend/app/services/visual_analyzer.py`)
+
+1. **Eye Contact & Head Pose (5 FPS Raw Video Pass)**:
+   - OpenCV decodes raw video at 5 FPS on demand without storing frames to disk.
+   - MediaPipe Face Mesh (`refine_landmarks=True`) estimates gaze vector & SolvePnP 3D head pose angles.
+   - Classifies frames into `eye_contact`, `looking_away`, or `looking_down`.
+2. **Head Movement Analysis**:
+   - Reuses head pose angles from 5 FPS pass to measure angular velocity/deltas without extra model passes.
+3. **Posture Analysis (1 FPS Frame Pass)**:
+   - MediaPipe Pose evaluates shoulder tilt ($\le 10.0^\circ$) and spine alignment ($\le 15.0^\circ$).
+4. **Hand Gesture Analysis (1 FPS Frame Pass)**:
+   - MediaPipe Hands tracks active hand presence percentage (`too_few`, `average`, `too_many`).
+
+---
+
+## MediaPipe Installation & Performance
+
+```bash
+pip install mediapipe opencv-python-headless
+```
+
+### Expected Visual Analysis Processing Time
+| Video Length | Device | Expected Visual Analysis Time |
+| :--- | :--- | :--- |
+| **1 Minute** | CPU | 3 – 6 seconds |
+| **1 Minute** | NVIDIA GPU (CUDA) | 1 – 2 seconds |
+| **5 Minutes** | CPU | 15 – 25 seconds |
+| **5 Minutes** | NVIDIA GPU (CUDA) | 5 – 10 seconds |
+
+---
+
 ## API Reference
 
 ### 1. GET Session Speech Analysis
 - **URL**: `GET /api/v1/sessions/{session_id}/speech-analysis`
-- **Response**: JSON containing full transcript, word timestamps, filler words, WPM metrics, pauses, and repetitions.
+- **Response**: JSON containing transcript, filler words, WPM metrics, pauses, repetitions.
 
-#### Example Response (200 OK)
-```json
-{
-  "session_id": "6ad7eed3-abd5-45f6-b728-39b558d55b7d",
-  "status": "speech_analysis_complete",
-  "speech_analysis": {
-    "transcript_text": "Hello everyone. Um, today I want to talk about our project. It was, like, really good.",
-    "words": [
-      { "word": "Hello", "start": 0.5, "end": 0.8, "probability": 0.95 },
-      { "word": "everyone.", "start": 0.85, "end": 1.2, "probability": 0.98 },
-      { "word": "Um,", "start": 1.5, "end": 1.8, "probability": 0.92 }
-    ],
-    "filler_words": [
-      { "word": "um", "timestamp": 1.5 },
-      { "word": "like", "timestamp": 4.1 }
-    ],
-    "filler_word_count": 2,
-    "wpm_data": {
-      "overall_wpm": 135.5,
-      "total_words": 18,
-      "total_speaking_duration_seconds": 8.0,
-      "windowed_wpm": [
-        { "window_start": 0.0, "window_end": 15.0, "wpm": 72.0 }
-      ]
-    },
-    "long_pauses": [
-      { "start_time": 8.5, "end_time": 10.8, "duration": 2.3 }
-    ],
-    "repetitions": [],
-    "analyzed_at": "2026-07-21T06:50:00.000Z"
-  }
-}
-```
+### 2. GET Session Visual Analysis
+- **URL**: `GET /api/v1/sessions/{session_id}/visual-analysis`
+- **Response**: JSON containing eye contact percentage, looking away ranges, posture score, poor posture ranges, gesture frequency, and head movement metrics.
+

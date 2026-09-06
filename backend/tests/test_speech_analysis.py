@@ -21,18 +21,35 @@ class MockMongoDBCollection:
         self.docs = {}
 
     async def insert_one(self, doc):
-        self.docs[doc["session_id"]] = doc
+        self.docs[doc["session_id"]] = doc.copy()
         return MagicMock(inserted_id=doc["session_id"])
 
     async def find_one(self, query):
         session_id = query.get("session_id")
-        return self.docs.get(session_id)
+        if not session_id or session_id not in self.docs:
+            return None
+        doc = self.docs[session_id]
+
+        for key, val in query.items():
+            if key == "session_id":
+                continue
+            if isinstance(val, dict) and "$ne" in val:
+                target_ne = val["$ne"]
+                if doc.get(key) == target_ne:
+                    return None
+            elif doc.get(key) != val:
+                return None
+
+        return doc.copy()
 
     async def update_one(self, query, update):
-        session_id = query.get("session_id")
-        if session_id in self.docs:
-            if "$set" in update:
-                self.docs[session_id].update(update["$set"])
+        matched_doc = await self.find_one(query)
+        if not matched_doc:
+            return MagicMock(modified_count=0)
+
+        session_id = matched_doc["session_id"]
+        if "$set" in update:
+            self.docs[session_id].update(update["$set"])
         return MagicMock(modified_count=1)
 
     async def delete_one(self, query):
@@ -48,7 +65,11 @@ class MockMongoDBCollection:
 @pytest.fixture(autouse=True)
 def mock_mongodb(monkeypatch):
     mock_col = MockMongoDBCollection()
+    monkeypatch.setattr("app.db.database.Database.get_collection", lambda name="sessions": mock_col)
     monkeypatch.setattr(MongoDB, "get_collection", lambda name="sessions": mock_col)
+    async def mock_connect():
+        pass
+    monkeypatch.setattr("app.db.database.Database.connect", mock_connect)
     return mock_col
 
 

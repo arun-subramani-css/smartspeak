@@ -4,12 +4,14 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import cv2
 
 from app.config import settings
 from app.db.mongodb import MongoDB
 from app.models.session import SessionStatus
 from app.services.speech_analyzer import process_speech_analysis_session
+from app.services.visual_analyzer import process_visual_analysis_session
 
 logger = logging.getLogger(__name__)
 
@@ -29,20 +31,22 @@ def get_ffmpeg_binary() -> str:
     return "ffmpeg"
 
 
-def _handle_speech_task_completion(task: asyncio.Task, session_id: str):
+def _handle_task_completion(task: asyncio.Task, session_id: str, task_name: str):
     """
-    Done callback for auto-chained speech analysis background task.
+    Done callback for auto-chained background analysis tasks.
     Catches unhandled exceptions and updates MongoDB status to 'failed' to prevent silent hangs.
     """
     try:
         task.result()
+    except asyncio.CancelledError:
+        logger.warning(f"[{session_id}] Task {task_name} was cancelled during event loop shutdown.")
     except Exception as exc:
-        err_msg = f"Auto-chained speech analysis failed: {str(exc)}"
+        err_msg = f"Auto-chained {task_name} analysis failed: {str(exc)}"
         logger.exception(f"[{session_id}] {err_msg}")
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(
-                MongoDB.get_collection("sessions").update_one(
+                Database.get_collection("sessions").update_one(
                     {"session_id": session_id},
                     {"$set": {"status": SessionStatus.FAILED, "error_reason": err_msg}}
                 )
@@ -54,15 +58,32 @@ def _handle_speech_task_completion(task: asyncio.Task, session_id: str):
 async def process_video_session(session_id: str) -> bool:
     """
     Background worker task to extract audio (16kHz mono WAV) and video frames (1 fps) for a session.
-    Upon completion, auto-chains into speech analysis.
+    Upon completion, auto-chains into Speech Analysis and Visual Analysis in parallel.
     """
     sessions_col = MongoDB.get_collection("sessions")
 
     # Fetch session record
     session_doc = await sessions_col.find_one({"session_id": session_id})
     if not session_doc:
-        logger.error(f"Session {session_id} not found in database.")
-        return False
+        matches = list(settings.staging_dir.glob(f"{session_id}.*"))
+        if matches:
+            staging_file = matches[0]
+            file_size = staging_file.stat().st_size
+            ext = staging_file.suffix
+            session_doc = {
+                "session_id": session_id,
+                "original_filename": f"video{ext}",
+                "upload_timestamp": datetime.now(timezone.utc),
+                "file_size": file_size,
+                "content_type": f"video/{ext.lstrip('.')}",
+                "status": SessionStatus.PROCESSING,
+                "file_path": str(staging_file)
+            }
+            await sessions_col.insert_one(session_doc)
+            logger.info(f"Auto-recovered session document in DB for {session_id}")
+        else:
+            logger.error(f"Session {session_id} not found in database or staging directory.")
+            return False
 
     # Update status to processing
     await sessions_col.update_one(
@@ -98,15 +119,14 @@ async def process_video_session(session_id: str) -> bool:
             str(audio_path)
         ]
 
-        proc = await asyncio.create_subprocess_exec(
-            *ffmpeg_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
+        def _run_ffmpeg_sync():
+            res = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return res.returncode, res.stderr.decode(errors="replace")
 
-        if proc.returncode != 0:
-            err_msg = stderr.decode(errors="replace")
+        loop = asyncio.get_running_loop()
+        returncode, err_msg = await loop.run_in_executor(None, _run_ffmpeg_sync)
+
+        if returncode != 0:
             logger.error(f"[{session_id}] FFmpeg audio extraction failed: {err_msg}")
             raise RuntimeError(f"FFmpeg audio extraction failed: {err_msg[-300:]}")
 
@@ -149,7 +169,7 @@ async def process_video_session(session_id: str) -> bool:
         if saved_count == 0:
             raise ValueError("No frames could be extracted from video.")
 
-        logger.info(f"[{session_id}] Audio & frame extraction completed. Updating DB and auto-chaining speech analysis...")
+        logger.info(f"[{session_id}] Audio & frame extraction completed. Updating DB and auto-chaining speech & visual analysis concurrently...")
 
         now = datetime.now(timezone.utc)
         await sessions_col.update_one(
@@ -165,9 +185,14 @@ async def process_video_session(session_id: str) -> bool:
             }
         )
 
-        # Auto-chain Speech Analysis as background task with done-callback error handling
+        # Auto-chain Speech Analysis and Visual Analysis in parallel and await completion
         speech_task = asyncio.create_task(process_speech_analysis_session(session_id))
-        speech_task.add_done_callback(lambda t: _handle_speech_task_completion(t, session_id))
+        speech_task.add_done_callback(lambda t: _handle_task_completion(t, session_id, "speech"))
+
+        visual_task = asyncio.create_task(process_visual_analysis_session(session_id))
+        visual_task.add_done_callback(lambda t: _handle_task_completion(t, session_id, "visual"))
+
+        await asyncio.gather(speech_task, visual_task, return_exceptions=True)
 
         return True
 

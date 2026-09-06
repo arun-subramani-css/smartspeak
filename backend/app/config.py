@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration settings loaded from environment variables or defaults."""
 
-    MONGODB_URL: str = "mongodb://localhost:27017"
+    MONGODB_URI: str | None = None
     MONGODB_DB_NAME: str = "smartspeak"
     STORAGE_DIR: str = "./data"
     MAX_UPLOAD_SIZE_MB: int = 500
@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     LONG_PAUSE_THRESHOLD_SECONDS: float = 2.0
     WPM_WINDOW_SECONDS: float = 15.0
     WPM_WINDOW_STEP_SECONDS: float = 5.0
+
+    # Visual Analysis Configuration
+    EYE_CONTACT_SAMPLING_FPS: float = 5.0
+    LOOKING_AWAY_MIN_DURATION_SECONDS: float = 2.0
+    POSTURE_SHOULDER_TILT_THRESHOLD: float = 10.0
+    POSTURE_SPINE_ANGLE_THRESHOLD: float = 15.0
+    GESTURE_TOO_FEW_THRESHOLD_PCT: float = 15.0
+    GESTURE_TOO_MANY_THRESHOLD_PCT: float = 60.0
+    HEAD_MOVEMENT_ANGLE_THRESHOLD: float = 15.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

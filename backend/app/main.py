@@ -5,8 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.db.mongodb import MongoDB
-from app.routers import sessions, speech_analysis, upload
+from app.db.database import Database
+from app.routers import sessions, speech_analysis, upload, visual_analysis
 from app.services.retention import start_retention_scheduler, stop_retention_scheduler
 
 # Configure logging
@@ -25,11 +25,12 @@ async def lifespan(app: FastAPI):
     settings.staging_dir.mkdir(parents=True, exist_ok=True)
     settings.processed_dir.mkdir(parents=True, exist_ok=True)
     
-    # Initialize MongoDB connection
+    # Initialize MongoDB connection (raises startup error if MONGODB_URI missing)
     try:
-        await MongoDB.connect()
+        await Database.connect()
     except Exception as e:
-        logger.warning(f"MongoDB connection failed on startup: {e}. (Will retry when needed)")
+        logger.error(f"MongoDB startup connection error: {e}")
+        raise e
 
     # Start retention cleanup scheduler
     try:
@@ -43,13 +44,13 @@ async def lifespan(app: FastAPI):
     
     logger.info("Shutting down SmartSpeak backend services...")
     stop_retention_scheduler()
-    await MongoDB.close()
+    await Database.close()
     logger.info("SmartSpeak backend shutdown complete.")
 
 
 app = FastAPI(
     title="SmartSpeak API",
-    description="Backend services for SmartSpeak - AI-powered public speaking coach (Video Ingestion, Frame/Audio Processing, and Speech Analysis).",
+    description="Backend services for SmartSpeak - AI-powered public speaking coach (Video Ingestion, Audio/Video Processing, Speech Analysis, and Visual Analysis).",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -71,6 +72,7 @@ app.mount("/data", StaticFiles(directory=str(settings.base_storage_path)), name=
 app.include_router(upload.router)
 app.include_router(sessions.router)
 app.include_router(speech_analysis.router)
+app.include_router(visual_analysis.router)
 
 
 @app.get("/")

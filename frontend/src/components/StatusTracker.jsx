@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { 
-  RefreshCw, CheckCircle2, Clock, AlertTriangle, Music, Image as ImageIcon, 
-  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2 
+import {
+  RefreshCw, CheckCircle2, Clock, AlertTriangle, Music, Image as ImageIcon,
+  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2
 } from 'lucide-react';
 
 export function StatusTracker({ sessionId, onReset }) {
   const [statusData, setStatusData] = useState(null);
   const [speechAnalysis, setSpeechAnalysis] = useState(null);
+  const [visualAnalysis, setVisualAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -21,9 +22,9 @@ export function StatusTracker({ sessionId, onReset }) {
       setStatusData(data);
       setError(null);
 
-      // If speech analysis is complete or available, fetch analysis data
-      if (data.status === 'speech_analysis_complete' || data.has_speech_analysis) {
+      if (data.status === 'speech_analysis_complete' || data.status === 'visual_analysis_complete' || data.status === 'ready_for_fusion' || data.has_speech_analysis || data.has_visual_analysis) {
         fetchSpeechAnalysis();
+        fetchVisualAnalysis();
       }
     } catch (err) {
       setError(err.message);
@@ -44,12 +45,24 @@ export function StatusTracker({ sessionId, onReset }) {
     }
   };
 
+  const fetchVisualAnalysis = async () => {
+    try {
+      const res = await fetch(`/api/v1/sessions/${sessionId}/visual-analysis`);
+      if (res.ok) {
+        const data = await res.json();
+        setVisualAnalysis(data.visual_analysis);
+      }
+    } catch (e) {
+      console.error("Failed to fetch visual analysis details:", e);
+    }
+  };
+
   useEffect(() => {
     if (!sessionId) return;
 
     fetchStatus();
     const interval = setInterval(() => {
-      if (statusData && (statusData.status === 'speech_analysis_complete' || statusData.status === 'failed')) {
+      if (statusData && (statusData.status === 'ready_for_fusion' || statusData.status === 'failed')) {
         clearInterval(interval);
         return;
       }
@@ -87,6 +100,18 @@ export function StatusTracker({ sessionId, onReset }) {
             <Sparkles size={12} /> Speech Analysis Complete
           </span>
         );
+      case 'visual_analysis_complete':
+        return (
+          <span className="badge-pill" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>
+            <ImageIcon size={12} /> Visual Analysis Complete
+          </span>
+        );
+      case 'ready_for_fusion':
+        return (
+          <span className="badge-pill" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }}>
+            <CheckCircle2 size={12} /> Speech & Visual Complete (Ready for Fusion)
+          </span>
+        );
       case 'failed':
         return (
           <span className="badge-pill" style={{ background: '#fef2f2', color: '#dc2626' }}>
@@ -100,12 +125,12 @@ export function StatusTracker({ sessionId, onReset }) {
 
   const frameList = statusData?.frame_count
     ? Array.from({ length: Math.min(statusData.frame_count, 12) }, (_, i) => {
-        const frameNum = String(i + 1).padStart(4, '0');
-        return `/data/processed/${sessionId}/frames/frame_${frameNum}.jpg`;
-      })
+      const frameNum = String(i + 1).padStart(4, '0');
+      return `/data/processed/${sessionId}/frames/frame_${frameNum}.jpg`;
+    })
     : [];
 
-  const isProcessedOrAnalyzed = statusData?.status === 'processed' || statusData?.status === 'speech_analysis_complete' || statusData?.has_speech_analysis;
+  const isProcessedOrAnalyzed = statusData?.status === 'processed' || statusData?.status === 'speech_analysis_complete' || statusData?.status === 'visual_analysis_complete' || statusData?.status === 'ready_for_fusion' || statusData?.has_speech_analysis || statusData?.has_visual_analysis;
 
   return (
     <div className="pro-card">
@@ -336,7 +361,14 @@ export function StatusTracker({ sessionId, onReset }) {
                         <Sparkles size={20} color="var(--primary-purple)" />
                         <span>Speech Analysis Insights</span>
                       </h3>
-                      <span className="badge-purple-hero">Whisper Base STT</span>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {speechAnalysis.average_transcription_confidence !== undefined && speechAnalysis.average_transcription_confidence !== null && (
+                          <span className="badge-pill" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontSize: '0.75rem', fontWeight: 600 }}>
+                            STT Conf: {(speechAnalysis.average_transcription_confidence * 100).toFixed(1)}%
+                          </span>
+                        )}
+                        <span className="badge-purple-hero">Whisper Base STT</span>
+                      </div>
                     </div>
 
                     {/* Transcript Card */}
@@ -474,7 +506,7 @@ export function StatusTracker({ sessionId, onReset }) {
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
                           <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <Clock size={18} color="#2563eb" />
-                            <span>Long Pauses ($\ge 3$s)</span>
+                            <span>Long Pauses </span>
                           </h4>
                           <span className="badge-pill">
                             {speechAnalysis.long_pauses?.length || 0} Pauses
@@ -546,6 +578,97 @@ export function StatusTracker({ sessionId, onReset }) {
                             No word or phrase repetitions detected.
                           </p>
                         )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* VISUAL ANALYSIS DASHBOARD RESULTS */}
+                {visualAnalysis && (
+                  <div style={{
+                    borderTop: '2px dashed #e2e8f0',
+                    paddingTop: '28px',
+                    marginTop: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '20px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <ImageIcon size={20} color="#0369a1" />
+                        <span>Visual Analysis Insights</span>
+                      </h3>
+                      <span className="badge-pill" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>
+                        MediaPipe 5FPS Eye & 1FPS Body
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                      {/* Eye Contact Card */}
+                      <div style={{ background: '#ffffff', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Eye Contact Rate</h4>
+                          <strong style={{ fontSize: '1.1rem', color: '#0369a1' }}>
+                            {visualAnalysis.eye_contact?.eye_contact_percentage}%
+                          </strong>
+                        </div>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', margin: 0 }}>
+                          <span>Looking Away Events: <strong>{visualAnalysis.eye_contact?.looking_away_count}</strong></span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                            Conf: {visualAnalysis.eye_contact?.average_detection_confidence != null
+                              ? `${(visualAnalysis.eye_contact.average_detection_confidence * 100).toFixed(0)}%`
+                              : 'N/A'}
+                          </span>
+                        </p>
+                      </div>
+
+                      {/* Posture Card */}
+                      <div style={{ background: '#ffffff', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Posture Score</h4>
+                          <strong style={{ fontSize: '1.1rem', color: '#059669' }}>
+                            {visualAnalysis.posture?.posture_score}%
+                          </strong>
+                        </div>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', margin: 0 }}>
+                          <span>Good Posture: <strong>{visualAnalysis.posture?.good_posture_count} / {visualAnalysis.posture?.total_frames_analyzed} frames</strong></span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                            Conf: {visualAnalysis.posture?.average_detection_confidence != null
+                              ? `${(visualAnalysis.posture.average_detection_confidence * 100).toFixed(0)}%`
+                              : 'N/A'}
+                          </span>
+                        </p>
+                      </div>
+
+                      {/* Gesture Usage Card */}
+                      <div style={{ background: '#ffffff', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Hand Gestures</h4>
+                          <span className="badge-pill" style={{ textTransform: 'capitalize' }}>
+                            {visualAnalysis.gesture?.gesture_usage_classification?.replace('_', ' ')}
+                          </span>
+                        </div>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', margin: 0 }}>
+                          <span>Active Hand: <strong>{visualAnalysis.gesture?.active_hand_percentage}%</strong></span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                            Conf: {visualAnalysis.gesture?.average_detection_confidence != null
+                              ? `${(visualAnalysis.gesture.average_detection_confidence * 100).toFixed(0)}%`
+                              : 'N/A'}
+                          </span>
+                        </p>
+                      </div>
+
+                      {/* Head Movement Card */}
+                      <div style={{ background: '#ffffff', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Head Movement</h4>
+                          <strong style={{ fontSize: '1.1rem', color: '#7c3aed' }}>
+                            {visualAnalysis.head_movement?.head_movement_score}%
+                          </strong>
+                        </div>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                          Rapid Movement Triggers: <strong>{visualAnalysis.head_movement?.excessive_movement_count}</strong>
+                        </p>
                       </div>
                     </div>
                   </div>

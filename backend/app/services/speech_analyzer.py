@@ -108,39 +108,66 @@ def transcribe_audio_sync(audio_path: Path, model_name: str) -> Tuple[str, List[
     """
     Synchronous Whisper transcription returning full text and word-level timestamps.
     Biases transcription toward filler words verbatim using initial_prompt and condition_on_previous_text=False.
+    Robustly handles PyTorch 2.x timing hook exceptions with segment-level fallback.
     """
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found at {audio_path}")
 
     model = _get_whisper_model(model_name)
 
-    # initial_prompt biases Whisper toward transcribing filler words verbatim (e.g. 'Um', 'uh')
-    # condition_on_previous_text=False prevents Whisper from 'cleaning up' segments based on previous style
-    result = model.transcribe(
-        str(audio_path),
-        word_timestamps=True,
-        initial_prompt="Um, uh, so, like, you know, basically...",
-        condition_on_previous_text=False
-    )
+    try:
+        result = model.transcribe(
+            str(audio_path),
+            word_timestamps=True,
+            initial_prompt="Um, uh, so, like, you know, basically...",
+            condition_on_previous_text=False
+        )
+    except Exception as exc:
+        logger.warning(f"Whisper word_timestamps=True failed ({exc}); falling back to segment-level transcription.")
+        result = model.transcribe(
+            str(audio_path),
+            word_timestamps=False,
+            initial_prompt="Um, uh, so, like, you know, basically...",
+            condition_on_previous_text=False
+        )
 
     transcript_text = result.get("text", "").strip()
     words_data: List[WordTimestamp] = []
 
     segments = result.get("segments", [])
     for segment in segments:
+        seg_start = float(segment.get("start", 0.0))
+        seg_end = float(segment.get("end", 0.0))
         segment_words = segment.get("words", [])
-        for w in segment_words:
-            w_text = w.get("word", "").strip()
-            if not w_text:
-                continue
-            words_data.append(
-                WordTimestamp(
-                    word=w_text,
-                    start=float(w.get("start", 0.0)),
-                    end=float(w.get("end", 0.0)),
-                    probability=float(w.get("probability")) if w.get("probability") is not None else None
+
+        if segment_words:
+            for w in segment_words:
+                w_text = w.get("word", "").strip()
+                if not w_text:
+                    continue
+                words_data.append(
+                    WordTimestamp(
+                        word=w_text,
+                        start=float(w.get("start", seg_start)),
+                        end=float(w.get("end", seg_end)),
+                        probability=float(w.get("probability")) if w.get("probability") is not None else None
+                    )
                 )
-            )
+        else:
+            # Estimate word timestamps evenly across segment if word_timestamps array is missing
+            tokens = segment.get("text", "").strip().split()
+            if tokens:
+                duration = max(0.1, seg_end - seg_start)
+                step = duration / len(tokens)
+                for idx, t in enumerate(tokens):
+                    words_data.append(
+                        WordTimestamp(
+                            word=t,
+                            start=round(seg_start + idx * step, 2),
+                            end=round(seg_start + (idx + 1) * step, 2),
+                            probability=1.0
+                        )
+                    )
 
     return transcript_text, words_data
 
@@ -389,8 +416,24 @@ async def process_speech_analysis_session(session_id: str) -> bool:
 
     session_doc = await sessions_col.find_one({"session_id": session_id})
     if not session_doc:
-        logger.error(f"[{session_id}] Session not found for speech analysis.")
-        return False
+        matches = list(settings.staging_dir.glob(f"{session_id}.*"))
+        if matches:
+            staging_file = matches[0]
+            ext = staging_file.suffix
+            session_doc = {
+                "session_id": session_id,
+                "original_filename": f"video{ext}",
+                "upload_timestamp": datetime.now(timezone.utc),
+                "file_size": staging_file.stat().st_size,
+                "content_type": f"video/{ext.lstrip('.')}",
+                "status": SessionStatus.PROCESSING,
+                "file_path": str(staging_file)
+            }
+            await sessions_col.insert_one(session_doc)
+            logger.info(f"Auto-recovered speech session document in DB for {session_id}")
+        else:
+            logger.error(f"[{session_id}] Session not found for speech analysis.")
+            return False
 
     await sessions_col.update_one(
         {"session_id": session_id},
@@ -432,6 +475,9 @@ async def process_speech_analysis_session(session_id: str) -> bool:
 
         logger.info(f"[{session_id}] Filler detection result: {filler_count} fillers found -> {[f.model_dump() for f in filler_words]}")
 
+        valid_probs = [w.probability for w in words if w.probability is not None]
+        avg_confidence = round(sum(valid_probs) / len(valid_probs), 4) if valid_probs else None
+
         analysis_result = SpeechAnalysisResult(
             transcript_text=transcript_text,
             words=words,
@@ -440,21 +486,44 @@ async def process_speech_analysis_session(session_id: str) -> bool:
             wpm_data=wpm_data,
             long_pauses=long_pauses,
             repetitions=repetitions,
-            analyzed_at=datetime.now(timezone.utc)
+            analyzed_at=datetime.now(timezone.utc),
+            average_transcription_confidence=avg_confidence
         )
 
-        await sessions_col.update_one(
-            {"session_id": session_id},
+        speech_dict = analysis_result.model_dump(mode="json")
+
+        # Atomic symmetric update: check if visual_analysis is already present in DB
+        res = await sessions_col.update_one(
+            {
+                "session_id": session_id,
+                "visual_analysis": {"$ne": None}
+            },
             {
                 "$set": {
-                    "speech_analysis": analysis_result.model_dump(),
-                    "status": SessionStatus.SPEECH_ANALYSIS_COMPLETE,
+                    "speech_analysis": speech_dict,
+                    "status": SessionStatus.READY_FOR_FUSION,
                     "error_reason": None
                 }
             }
         )
 
-        logger.info(f"[{session_id}] Speech analysis complete and stored in MongoDB.")
+        if res.modified_count == 0:
+            # Visual analysis is not completed yet, set status to SPEECH_ANALYSIS_COMPLETE
+            await sessions_col.update_one(
+                {"session_id": session_id},
+                {
+                    "$set": {
+                        "speech_analysis": speech_dict,
+                        "status": SessionStatus.SPEECH_ANALYSIS_COMPLETE,
+                        "error_reason": None
+                    }
+                }
+            )
+
+        logger.info(
+            f"[{session_id}] Speech analysis complete and stored in MongoDB.\n"
+            f"  -> Average Transcription (STT) Confidence: {avg_confidence if avg_confidence is not None else 'N/A'}"
+        )
         return True
 
     except Exception as exc:
