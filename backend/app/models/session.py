@@ -10,6 +10,7 @@ class SessionStatus(str, Enum):
     SPEECH_ANALYSIS_COMPLETE = "speech_analysis_complete"
     VISUAL_ANALYSIS_COMPLETE = "visual_analysis_complete"
     READY_FOR_FUSION = "ready_for_fusion"
+    FUSION_COMPLETE = "fusion_complete"
     FAILED = "failed"
 
 
@@ -135,6 +136,26 @@ class ConfidenceAnalysisResponse(BaseModel):
     confidence_analysis: ConfidenceAnalysisResult
 
 
+# --- Fusion & Mistake Detection Models ---
+
+class MistakeItem(BaseModel):
+    timestamp: float
+    category: str  # "speech", "visual", "compound"
+    description: str
+    severity: str  # "minor", "medium", "high"
+    events: list[str] | None = None
+
+
+class FusionReportResult(BaseModel):
+    mistakes: list[MistakeItem] = []
+    smartspeak_index: float
+    grade: str  # "Needs Practice", "Competent", "Polished", "Executive"
+    verbal_score: float
+    non_verbal_score: float
+    ml_confidence_score: float
+    analyzed_at: datetime
+
+
 # --- Session Base & Document Models ---
 
 class SessionBase(BaseModel):
@@ -155,6 +176,7 @@ class SessionDocument(SessionBase):
     speech_analysis: SpeechAnalysisResult | None = None
     visual_analysis: VisualAnalysisResult | None = None
     confidence_analysis: ConfidenceAnalysisResult | None = None
+    fusion_report: FusionReportResult | None = None
 
 
 # --- Response Models ---
@@ -181,6 +203,7 @@ class StatusResponse(BaseModel):
     frame_count: int | None = None
     has_speech_analysis: bool = False
     has_visual_analysis: bool = False
+    has_fusion_report: bool = False
 
 
 class SpeechAnalysisResponse(BaseModel):
@@ -193,4 +216,10 @@ class VisualAnalysisResponse(BaseModel):
     session_id: str
     status: SessionStatus
     visual_analysis: VisualAnalysisResult
+
+
+class FusionReportResponse(BaseModel):
+    session_id: str
+    status: SessionStatus
+    fusion_report: FusionReportResult
 

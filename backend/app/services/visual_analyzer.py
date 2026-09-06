@@ -526,7 +526,7 @@ def analyze_posture_and_gestures_sync(frames_dir: Path, confidence_results: list
 
                 dx = r_shoulder.x - l_shoulder.x
                 dy = r_shoulder.y - l_shoulder.y
-                shoulder_tilt = abs(math.atan2(dy, dx) * 180.0 / math.pi)
+                shoulder_tilt = abs(math.atan2(dy, abs(dx)) * 180.0 / math.pi)
 
                 shoulder_mid_x = (l_shoulder.x + r_shoulder.x) / 2.0
                 shoulder_mid_y = (l_shoulder.y + r_shoulder.y) / 2.0

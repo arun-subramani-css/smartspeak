@@ -12,6 +12,7 @@ from app.db.mongodb import MongoDB
 from app.models.session import SessionStatus
 from app.services.speech_analyzer import process_speech_analysis_session
 from app.services.visual_analyzer import process_visual_analysis_session
+from app.services.fusion_engine import process_fusion_session
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,12 @@ async def process_video_session(session_id: str) -> bool:
         visual_task.add_done_callback(lambda t: _handle_task_completion(t, session_id, "visual"))
 
         await asyncio.gather(speech_task, visual_task, return_exceptions=True)
+
+        # Auto-chain Feature Fusion analysis if ready
+        doc = await sessions_col.find_one({"session_id": session_id})
+        if doc and doc.get("status") == SessionStatus.READY_FOR_FUSION:
+            logger.info(f"[{session_id}] Auto-chaining Feature Fusion analysis...")
+            await process_fusion_session(session_id)
 
         return True
 

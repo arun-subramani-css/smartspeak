@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.db.database import Database
-from app.routers import sessions, speech_analysis, upload, visual_analysis
+from app.routers import fusion, sessions, speech_analysis, upload, visual_analysis
 from app.services.retention import start_retention_scheduler, stop_retention_scheduler
 
 # Configure logging
@@ -73,6 +73,7 @@ app.include_router(upload.router)
 app.include_router(sessions.router)
 app.include_router(speech_analysis.router)
 app.include_router(visual_analysis.router)
+app.include_router(fusion.router)
 
 
 @app.get("/")
