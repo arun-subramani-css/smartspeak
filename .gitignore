@@ -13,6 +13,13 @@ ENV/
 # Data storage (uploaded/processed videos, audio, frames)
 backend/data/
 data/
+frames/
+frames_by_category/
+frames_classified/
+spot_check_sample/
+human_verification/
+human_verification_gallery.html
+human_verification_review_sheet.csv
 
 # Environment configuration
 .env
