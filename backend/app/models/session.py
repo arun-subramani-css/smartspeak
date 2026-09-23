@@ -190,6 +190,12 @@ class UploadResponse(BaseModel):
     upload_timestamp: datetime
 
 
+class StageProgress(BaseModel):
+    percent: float
+    detail: str = ""
+    updated_at: datetime | None = None
+
+
 class StatusResponse(BaseModel):
     session_id: str
     status: SessionStatus
@@ -204,6 +210,9 @@ class StatusResponse(BaseModel):
     has_speech_analysis: bool = False
     has_visual_analysis: bool = False
     has_fusion_report: bool = False
+    progress_stage: str | None = None
+    speech_progress: StageProgress | None = None
+    visual_progress: StageProgress | None = None
 
 
 class SpeechAnalysisResponse(BaseModel):

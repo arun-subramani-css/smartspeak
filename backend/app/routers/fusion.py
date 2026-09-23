@@ -38,28 +38,29 @@ async def get_fusion_report(session_id: str, recompute: bool = False):
             fusion_report=FusionReportResult(**fusion_data)
         )
 
-    # If fusion report is not yet saved, check if session is ready for fusion
+    # If fusion report is not yet saved, check if session has analysis data
     speech_data = session.get("speech_analysis")
     visual_data = session.get("visual_analysis")
     conf_data = session.get("confidence_analysis")
 
-    if speech_data is not None and visual_data is not None:
-        # Dynamically compute, store, and return
+    if speech_data is not None or visual_data is not None:
+        # Dynamically compute, store, and return using proportional re-weighting
         fusion_result = generate_fusion_report_sync(speech_data, visual_data, conf_data)
         fusion_dict = fusion_result.model_dump(mode="json")
+        next_status = SessionStatus.FUSION_COMPLETE if (speech_data is not None and visual_data is not None) else session.get("status", SessionStatus.FUSION_COMPLETE)
         await sessions_col.update_one(
             {"session_id": session_id},
             {
                 "$set": {
                     "fusion_report": fusion_dict,
-                    "status": SessionStatus.FUSION_COMPLETE,
+                    "status": next_status,
                     "error_reason": None
                 }
             }
         )
         return FusionReportResponse(
             session_id=session["session_id"],
-            status=SessionStatus.FUSION_COMPLETE,
+            status=next_status,
             fusion_report=fusion_result
         )
 
@@ -68,7 +69,7 @@ async def get_fusion_report(session_id: str, recompute: bool = False):
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=(
             f"Fusion report not available for session '{session_id}'. "
-            f"Current status is '{current_status}'. Both speech and visual analysis must complete first."
+            f"Current status is '{current_status}'. Analysis must complete first."
         )
     )
 

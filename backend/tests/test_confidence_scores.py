@@ -178,7 +178,7 @@ async def test_speech_confidence_clean(mock_mongodb, monkeypatch):
     ]
     monkeypatch.setattr(
         "app.services.speech_analyzer.transcribe_audio_sync",
-        lambda path, model: ("This is clear speech", mock_words)
+        lambda path, model, progress_cb=None: ("This is clear speech", mock_words)
     )
 
     success = await process_speech_analysis_session(session_id)
@@ -218,7 +218,7 @@ async def test_speech_confidence_noisy(mock_mongodb, monkeypatch):
     ]
     monkeypatch.setattr(
         "app.services.speech_analyzer.transcribe_audio_sync",
-        lambda path, model: ("mumble noise", mock_words)
+        lambda path, model, progress_cb=None: ("mumble noise", mock_words)
     )
 
     success = await process_speech_analysis_session(session_id)

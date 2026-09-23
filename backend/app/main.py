@@ -1,5 +1,10 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="google.protobuf")
+
+import asyncio
 from contextlib import asynccontextmanager
 import logging
+import threading
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -25,11 +30,11 @@ async def lifespan(app: FastAPI):
     settings.staging_dir.mkdir(parents=True, exist_ok=True)
     settings.processed_dir.mkdir(parents=True, exist_ok=True)
     
-    # Initialize MongoDB connection (raises startup error if MONGODB_URI missing)
+    # Initialize persistent local document database
     try:
         await Database.connect()
     except Exception as e:
-        logger.error(f"MongoDB startup connection error: {e}")
+        logger.error(f"Database startup initialization error: {e}")
         raise e
 
     # Start retention cleanup scheduler
@@ -37,6 +42,32 @@ async def lifespan(app: FastAPI):
         start_retention_scheduler()
     except Exception as e:
         logger.warning(f"Scheduler start warning: {e}")
+
+    # Prewarm heavy ML models in the background so the first upload does not
+    # pay the multi-second model-load latency (Whisper + spaCy + classifier).
+    if settings.PREWARM_MODELS:
+        def _prewarm_models():
+            try:
+                from app.services.speech_analyzer import _get_faster_model, get_spacy_nlp
+                from app.services.visual_analyzer import _get_confidence_model, _get_posture_model
+                from app.config import settings as _s
+                if _s.WHISPER_ENGINE == "faster":
+                    _get_faster_model(_s.WHISPER_MODEL)
+                else:
+                    from app.services.speech_analyzer import _get_whisper_model
+                    _get_whisper_model(_s.WHISPER_MODEL)
+                get_spacy_nlp()
+                _get_confidence_model()
+                _get_posture_model()
+                logger.info("Model prewarm complete: Whisper, spaCy, and confidence/posture classifiers are in memory.")
+            except Exception as e:
+                logger.warning(f"Model prewarm skipped/failed (first request will load lazily): {e}")
+
+        threading.Thread(target=_prewarm_models, name="model-prewarm", daemon=True).start()
+
+    # Capture the main event loop so sync worker threads can report progress.
+    from app.services import progress as _progress
+    _progress.set_event_loop(asyncio.get_running_loop())
 
     logger.info("SmartSpeak backend ready.")
     

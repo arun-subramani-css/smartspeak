@@ -24,6 +24,7 @@ async def get_session_status(session_id: str):
 
     has_speech = "speech_analysis" in session and session["speech_analysis"] is not None
     has_visual = "visual_analysis" in session and session["visual_analysis"] is not None
+    has_fusion = "fusion_report" in session and session["fusion_report"] is not None
 
     return StatusResponse(
         session_id=session["session_id"],
@@ -37,5 +38,9 @@ async def get_session_status(session_id: str):
         audio_path=session.get("audio_path"),
         frame_count=session.get("frame_count"),
         has_speech_analysis=has_speech,
-        has_visual_analysis=has_visual
+        has_visual_analysis=has_visual,
+        has_fusion_report=has_fusion,
+        progress_stage=session.get("progress_stage"),
+        speech_progress=session.get("speech_progress") or None,
+        visual_progress=session.get("visual_progress") or None
     )

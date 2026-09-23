@@ -10,6 +10,7 @@ import cv2
 from app.config import settings
 from app.db.mongodb import MongoDB
 from app.models.session import SessionStatus
+from app.services import progress as progress_svc
 from app.services.speech_analyzer import process_speech_analysis_session
 from app.services.visual_analyzer import process_visual_analysis_session
 from app.services.fusion_engine import process_fusion_session
@@ -106,66 +107,129 @@ async def process_video_session(session_id: str) -> bool:
         frames_dir.mkdir(parents=True, exist_ok=True)
         audio_path = session_processed_dir / "audio.wav"
 
-        # Step 1: Extract Audio using FFmpeg (16kHz mono WAV)
+        # Step 1: Extract Audio using FFmpeg (16kHz mono WAV, voice-optimized enhancement chain)
         ffmpeg_bin = get_ffmpeg_binary()
         logger.info(f"[{session_id}] Extracting audio with FFmpeg ({ffmpeg_bin})...")
-        ffmpeg_cmd = [
+
+        # Voice-focused filter chain:
+        #   1. highpass       -> removes low-frequency rumble (AC hum, desk thumps, wind, mic booms)
+        #   2. afftdn         -> FFT-based broadband noise reduction (fans, AC units, room hiss)
+        #   3. lowpass        -> removes high-frequency hiss/sibilance noise above the voice band
+        #   4. loudnorm       -> normalizes speech loudness so quiet speakers decode reliably
+        # Kept intentionally lightweight (no model download) and always-on for consistency.
+        audio_filters = [
+            f"highpass=f={settings.AUDIO_HIGH_PASS_HZ}",
+            f"afftdn=nr={settings.AUDIO_NOISE_REDUCTION_DB}:nf=-25",
+            f"lowpass=f={settings.AUDIO_LOW_PASS_HZ}",
+            "loudnorm=I=-16:TP=-1.5:LRA=11",
+        ]
+        filter_chain = ",".join(audio_filters)
+        logger.info(f"[{session_id}] Audio enhancement chain: {filter_chain}")
+
+        ffmpeg_cmd_enhanced = [
             ffmpeg_bin,
             "-y",
             "-i", str(staging_file),
             "-vn",
             "-ac", "1",
             "-ar", "16000",
+            "-af", filter_chain,
             "-c:a", "pcm_s16le",
             str(audio_path)
         ]
 
-        def _run_ffmpeg_sync():
-            res = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # Fallback chain without denoiser for older ffmpeg builds lacking afftdn
+        ffmpeg_cmd_norm = [
+            ffmpeg_bin,
+            "-y",
+            "-i", str(staging_file),
+            "-vn",
+            "-ac", "1",
+            "-ar", "16000",
+            "-af", f"highpass=f={settings.AUDIO_HIGH_PASS_HZ},loudnorm=I=-16:TP=-1.5:LRA=11",
+            "-c:a", "pcm_s16le",
+            str(audio_path)
+        ]
+
+        def _run_audio_ffmpeg():
+            res = subprocess.run(ffmpeg_cmd_enhanced, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if res.returncode != 0:
+                logger.warning(f"[{session_id}] Enhanced audio chain failed; retrying without denoiser. stderr: {res.stderr.decode(errors='replace')[-200:]}")
+                # Fallback to high-pass + loudness normalization only (skips afftdn)
+                res = subprocess.run(ffmpeg_cmd_norm, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if res.returncode != 0:
+                logger.warning(f"[{session_id}] Filtered audio chain failed; falling back to plain extraction. stderr: {res.stderr.decode(errors='replace')[-200:]}")
+                # Final fallback: plain 16kHz mono extraction with no filters at all
+                ffmpeg_cmd_basic = [
+                    ffmpeg_bin,
+                    "-y",
+                    "-i", str(staging_file),
+                    "-vn",
+                    "-ac", "1",
+                    "-ar", "16000",
+                    "-c:a", "pcm_s16le",
+                    str(audio_path)
+                ]
+                res = subprocess.run(ffmpeg_cmd_basic, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             return res.returncode, res.stderr.decode(errors="replace")
 
         loop = asyncio.get_running_loop()
-        returncode, err_msg = await loop.run_in_executor(None, _run_ffmpeg_sync)
+        returncode, err_msg = await loop.run_in_executor(None, _run_audio_ffmpeg)
 
         if returncode != 0:
             logger.error(f"[{session_id}] FFmpeg audio extraction failed: {err_msg}")
             raise RuntimeError(f"FFmpeg audio extraction failed: {err_msg[-300:]}")
 
-        # Step 2: Extract Video Frames using OpenCV (1 fps default)
-        logger.info(f"[{session_id}] Extracting frames with OpenCV...")
-        cap = cv2.VideoCapture(str(staging_file))
-        if not cap.isOpened():
-            raise ValueError("OpenCV failed to open video file. Video may be corrupted or codec unsupported.")
-
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        if fps <= 0 or total_frames <= 0:
-            cap.release()
-            raise ValueError("Corrupted video file: invalid frame rate or frame count.")
-
+        # Step 2: Extract Video Frames (FFmpeg fast extraction with OpenCV fallback)
         sample_rate = max(0.1, settings.FRAME_SAMPLE_RATE_FPS)
-        step = max(1, int(round(fps / sample_rate)))
+        logger.info(f"[{session_id}] Extracting frames with FFmpeg at {sample_rate} fps...")
+        frame_pattern = str(frames_dir / "frame_%04d.jpg")
+        ffmpeg_frames_cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-i", str(staging_file),
+            "-vf", f"fps={sample_rate},scale='min(1280,iw)':-2",
+            "-q:v", "3",
+            frame_pattern
+        ]
 
-        saved_count = 0
-        current_frame = 0
+        def _run_frames_ffmpeg():
+            res = subprocess.run(ffmpeg_frames_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return res.returncode
 
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+        await loop.run_in_executor(None, _run_frames_ffmpeg)
+        saved_count = len(list(frames_dir.glob("frame_*.jpg")))
 
-            if current_frame % step == 0:
-                saved_count += 1
-                frame_name = f"frame_{saved_count:04d}.jpg"
-                frame_path = frames_dir / frame_name
-                success = cv2.imwrite(str(frame_path), frame)
-                if not success:
-                    logger.warning(f"Failed to write frame file {frame_path}")
+        if saved_count == 0:
+            logger.info(f"[{session_id}] FFmpeg frame extraction returned 0 frames; falling back to OpenCV...")
+            cap = cv2.VideoCapture(str(staging_file))
+            if not cap.isOpened():
+                raise ValueError("OpenCV failed to open video file. Video may be corrupted or codec unsupported.")
 
-            current_frame += 1
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        cap.release()
+            if fps <= 0 or total_frames <= 0:
+                cap.release()
+                raise ValueError("Corrupted video file: invalid frame rate or frame count.")
+
+            step = max(1, int(round(fps / sample_rate)))
+            current_frame = 0
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                if current_frame % step == 0:
+                    saved_count += 1
+                    frame_name = f"frame_{saved_count:04d}.jpg"
+                    frame_path = frames_dir / frame_name
+                    cv2.imwrite(str(frame_path), frame)
+
+                current_frame += 1
+
+            cap.release()
 
         if saved_count == 0:
             raise ValueError("No frames could be extracted from video.")
@@ -181,8 +245,10 @@ async def process_video_session(session_id: str) -> bool:
                     "processed_at": now,
                     "audio_path": str(audio_path.relative_to(settings.base_storage_path)),
                     "frame_count": saved_count,
-                    "error_reason": None
-                }
+                    "error_reason": None,
+                    "progress_stage": "analyzing"
+                },
+                "$unset": {"speech_progress": "", "visual_progress": ""}
             }
         )
 
@@ -199,6 +265,7 @@ async def process_video_session(session_id: str) -> bool:
         doc = await sessions_col.find_one({"session_id": session_id})
         if doc and doc.get("status") == SessionStatus.READY_FOR_FUSION:
             logger.info(f"[{session_id}] Auto-chaining Feature Fusion analysis...")
+            progress_svc.set_stage(session_id, "fusion")
             await process_fusion_session(session_id)
 
         return True

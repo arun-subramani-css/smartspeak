@@ -195,7 +195,7 @@ async def test_speech_analysis_overwrite_on_rerun(mock_mongodb, monkeypatch):
     ]
     monkeypatch.setattr(
         "app.services.speech_analyzer.transcribe_audio_sync",
-        lambda audio_path, model_name: ("New transcript version two", mock_words)
+        lambda audio_path, model_name, progress_cb=None: ("New transcript version two", mock_words)
     )
 
     success = await process_speech_analysis_session(session_id)

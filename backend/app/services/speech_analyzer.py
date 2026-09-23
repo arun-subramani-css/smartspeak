@@ -47,6 +47,7 @@ def _get_whisper_model(model_name: str):
       (Note: If faster-whisper is used, set vad_filter=False or min_silence_duration_ms=1000 to avoid stripping short filler bursts like 'um').
     We use openai-whisper with model size specified by settings.WHISPER_MODEL (default: 'base').
     """
+    global _whisper_model_cache
     if model_name not in _whisper_model_cache:
         import whisper
         logger.info(f"Loading Whisper model '{model_name}' into memory...")
@@ -104,32 +105,153 @@ def classify_filler_context(word_text: str, pos_tag: str, surrounding_text: str 
     return False
 
 
-def transcribe_audio_sync(audio_path: Path, model_name: str) -> Tuple[str, List[WordTimestamp]]:
+def transcribe_audio_sync(audio_path: Path, model_name: str, progress_cb=None) -> Tuple[str, List[WordTimestamp]]:
     """
-    Synchronous Whisper transcription returning full text and word-level timestamps.
-    Biases transcription toward filler words verbatim using initial_prompt and condition_on_previous_text=False.
-    Robustly handles PyTorch 2.x timing hook exceptions with segment-level fallback.
+    Transcribe audio, returning full text and word-level timestamps.
+
+    Engine selection (WHISPER_ENGINE):
+      - "faster": faster-whisper (CTranslate2, int8 CPU). Typically 3-4x faster
+        than openai-whisper on CPU with equal or better accuracy, plus built-in
+        VAD filtering that skips non-speech chunks.
+      - "openai": original openai-whisper (PyTorch).
+    Falls back to openai-whisper automatically if faster-whisper is unavailable
+    or fails, so transcription never hard-depends on the optional package.
     """
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found at {audio_path}")
 
+    if settings.WHISPER_ENGINE == "faster":
+        try:
+            return _transcribe_with_faster_whisper(audio_path, model_name, progress_cb=progress_cb)
+        except Exception as exc:
+            logger.warning(f"faster-whisper transcription failed ({exc}); falling back to openai-whisper.")
+    return _transcribe_with_openai_whisper(audio_path, model_name)
+
+
+_faster_model_cache = {}
+
+
+def _get_faster_model(model_name: str):
+    """Cache and return a faster-whisper WhisperModel (int8 on CPU)."""
+    if model_name not in _faster_model_cache:
+        from faster_whisper import WhisperModel
+        logger.info(f"Loading faster-whisper model '{model_name}' (int8 CPU)...")
+        _faster_model_cache[model_name] = WhisperModel(
+            model_name,
+            device="cpu",
+            compute_type="int8",
+        )
+    return _faster_model_cache[model_name]
+
+
+def _transcribe_with_faster_whisper(audio_path: Path, model_name: str, progress_cb=None) -> Tuple[str, List[WordTimestamp]]:
+    """faster-whisper (CTranslate2) transcription with word timestamps.
+
+    vad_filter=True skips non-speech chunks (music, silence, noise) before the
+    acoustic model runs, which both speeds up transcription and removes the
+    classic Whisper hallucination-on-silence failure mode.
+    """
+    model = _get_faster_model(model_name)
+
+    segments, _info = model.transcribe(
+        str(audio_path),
+        language="en",
+        beam_size=settings.WHISPER_BEAM_SIZE,
+        temperature=0.0,
+        condition_on_previous_text=settings.WHISPER_CONDITION_ON_PREVIOUS_TEXT,
+        word_timestamps=True,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 500},
+        initial_prompt="Transcribe speech accurately including natural pauses and filler words like um and uh.",
+    )
+
+    transcript_parts: List[str] = []
+    words_data: List[WordTimestamp] = []
+    total_duration = float(getattr(_info, "duration", 0.0) or 0.0)
+
+    for segment in segments:
+        seg_start = float(getattr(segment, "start", 0.0) or 0.0)
+        seg_end = float(getattr(segment, "end", 0.0) or 0.0)
+        seg_text = (getattr(segment, "text", "") or "").strip()
+        if seg_text:
+            transcript_parts.append(seg_text)
+
+        if progress_cb and total_duration > 0:
+            progress_cb(min(95.0, 100.0 * seg_end / total_duration), f"transcribed {seg_end:.0f}s / {total_duration:.0f}s")
+
+        seg_words = list(getattr(segment, "words", None) or [])
+        if seg_words:
+            for w in seg_words:
+                w_text = (getattr(w, "word", "") or "").strip()
+                if not w_text:
+                    continue
+                words_data.append(
+                    WordTimestamp(
+                        word=w_text,
+                        start=round(float(getattr(w, "start", seg_start)), 2),
+                        end=round(float(getattr(w, "end", seg_end)), 2),
+                        probability=float(w.probability) if getattr(w, "probability", None) is not None else None,
+                    )
+                )
+        elif seg_text:
+            # Word timestamps missing for this segment: distribute tokens evenly.
+            tokens = seg_text.split()
+            duration = max(0.1, seg_end - seg_start)
+            step = duration / len(tokens)
+            for idx, t in enumerate(tokens):
+                words_data.append(
+                    WordTimestamp(
+                        word=t,
+                        start=round(seg_start + idx * step, 2),
+                        end=round(seg_start + (idx + 1) * step, 2),
+                        probability=1.0,
+                    )
+                )
+
+    return " ".join(transcript_parts).strip(), words_data
+
+
+def _transcribe_with_openai_whisper(audio_path: Path, model_name: str) -> Tuple[str, List[WordTimestamp]]:
+    """
+    Synchronous openai-whisper transcription returning full text and word-level timestamps.
+    Biases transcription toward filler words verbatim using initial_prompt and condition_on_previous_text=False.
+    Robustly handles PyTorch 2.x timing hook exceptions with segment-level fallback.
+    """
     model = _get_whisper_model(model_name)
 
+    # Decoding tuned for noisy real-world recordings:
+    #   beam_size (default 1) -> beam search explores multiple hypotheses per word,
+    #                        recovering words lost to noise, at ~3x the CPU time.
+    #                        Leave at 1 when audio is denoised upstream (the
+    #                        quality difference is negligible once the filter
+    #                        chain has run) and raise it only for very noisy
+    #                        single-channel recordings via WHISPER_BEAM_SIZE.
+    #   condition_on_previous_text=False -> prevents error cascades where an early
+    #                        mis-recognition poisons the context for the rest of the audio
+    #   temperature=0.0   -> deterministic, most-likely decoding for consistency
+    transcribe_kwargs = dict(
+        word_timestamps=True,
+        language="en",
+        fp16=False,
+        temperature=0.0,
+        initial_prompt="Transcribe speech accurately including natural pauses and filler words like um and uh.",
+        condition_on_previous_text=settings.WHISPER_CONDITION_ON_PREVIOUS_TEXT,
+        beam_size=settings.WHISPER_BEAM_SIZE,
+    )
+
     try:
-        result = model.transcribe(
-            str(audio_path),
-            word_timestamps=True,
-            initial_prompt="Um, uh, so, like, you know, basically...",
-            condition_on_previous_text=False
-        )
+        result = model.transcribe(str(audio_path), **transcribe_kwargs)
+    except TypeError:
+        # Compatibility guard: very old whisper builds may not expose beam_size
+        transcribe_kwargs.pop("beam_size", None)
+        result = model.transcribe(str(audio_path), **transcribe_kwargs)
     except Exception as exc:
         logger.warning(f"Whisper word_timestamps=True failed ({exc}); falling back to segment-level transcription.")
-        result = model.transcribe(
-            str(audio_path),
-            word_timestamps=False,
-            initial_prompt="Um, uh, so, like, you know, basically...",
-            condition_on_previous_text=False
-        )
+        try:
+            result = model.transcribe(str(audio_path), **{**transcribe_kwargs, "word_timestamps": False})
+        except TypeError:
+            kwargs_no_beam = {k: v for k, v in transcribe_kwargs.items() if k != "beam_size"}
+            result = model.transcribe(str(audio_path), **{**kwargs_no_beam, "word_timestamps": False})
 
     transcript_text = result.get("text", "").strip()
     words_data: List[WordTimestamp] = []
@@ -414,6 +536,8 @@ async def process_speech_analysis_session(session_id: str) -> bool:
     """
     sessions_col = MongoDB.get_collection("sessions")
 
+    from app.services import progress as progress_svc
+
     session_doc = await sessions_col.find_one({"session_id": session_id})
     if not session_doc:
         matches = list(settings.staging_dir.glob(f"{session_id}.*"))
@@ -455,9 +579,11 @@ async def process_speech_analysis_session(session_id: str) -> bool:
 
         transcript_text, words = await loop.run_in_executor(
             None,
-            transcribe_audio_sync,
-            audio_path,
-            settings.WHISPER_MODEL
+            lambda: transcribe_audio_sync(
+                audio_path,
+                settings.WHISPER_MODEL,
+                progress_cb=lambda pct, msg: progress_svc.report_progress(session_id, "speech_progress", pct, msg),
+            ),
         )
 
         logger.info(f"[{session_id}] Raw Whisper transcript: '{transcript_text}'")

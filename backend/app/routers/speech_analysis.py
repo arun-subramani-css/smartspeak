@@ -27,7 +27,7 @@ async def get_speech_analysis(session_id: str):
     if not speech_analysis_data:
         current_status = session.get("status", "unknown")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Speech analysis not complete yet for session '{session_id}'. Current status is '{current_status}'."
         )
 

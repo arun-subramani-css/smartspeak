@@ -189,7 +189,7 @@ async def test_parallel_auto_chaining_reaches_ready_for_fusion(mock_mongodb, mon
     # Mock Whisper transcription for speech analysis
     monkeypatch.setattr(
         "app.services.speech_analyzer.transcribe_audio_sync",
-        lambda path, model: ("Hello world test", [])
+        lambda path, model, progress_cb=None: ("Hello world test", [])
     )
     # Create fake audio file
     audio_file = settings.processed_dir / session_id / "audio.wav"

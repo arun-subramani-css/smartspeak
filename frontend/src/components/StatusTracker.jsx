@@ -1,16 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import {
   RefreshCw, CheckCircle2, Clock, AlertTriangle, Music, Image as ImageIcon,
-  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2
+  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2, Award, TrendingUp
 } from 'lucide-react';
 
 export function StatusTracker({ sessionId, onReset }) {
   const [statusData, setStatusData] = useState(null);
   const [speechAnalysis, setSpeechAnalysis] = useState(null);
   const [visualAnalysis, setVisualAnalysis] = useState(null);
+  const [fusionReport, setFusionReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [showAllFrames, setShowAllFrames] = useState(false);
+  const [selectedFrameSrc, setSelectedFrameSrc] = useState(null);
 
   const fetchStatus = async () => {
     try {
@@ -22,9 +25,31 @@ export function StatusTracker({ sessionId, onReset }) {
       setStatusData(data);
       setError(null);
 
-      if (data.status === 'speech_analysis_complete' || data.status === 'visual_analysis_complete' || data.status === 'ready_for_fusion' || data.has_speech_analysis || data.has_visual_analysis) {
+      if (
+        data.has_speech_analysis ||
+        data.status === 'speech_analysis_complete' ||
+        data.status === 'ready_for_fusion' ||
+        data.status === 'fusion_complete'
+      ) {
         fetchSpeechAnalysis();
+      }
+
+      if (
+        data.has_visual_analysis ||
+        data.status === 'visual_analysis_complete' ||
+        data.status === 'ready_for_fusion' ||
+        data.status === 'fusion_complete'
+      ) {
         fetchVisualAnalysis();
+      }
+
+      if (
+        data.has_fusion_report ||
+        data.status === 'ready_for_fusion' ||
+        data.status === 'fusion_complete' ||
+        (data.has_speech_analysis && data.has_visual_analysis)
+      ) {
+        fetchFusionReport();
       }
     } catch (err) {
       setError(err.message);
@@ -57,12 +82,24 @@ export function StatusTracker({ sessionId, onReset }) {
     }
   };
 
+  const fetchFusionReport = async () => {
+    try {
+      const res = await fetch(`/api/v1/sessions/${sessionId}/fusion-report`);
+      if (res.ok) {
+        const data = await res.json();
+        setFusionReport(data.fusion_report);
+      }
+    } catch (e) {
+      console.error("Failed to fetch fusion report details:", e);
+    }
+  };
+
   useEffect(() => {
     if (!sessionId) return;
 
     fetchStatus();
     const interval = setInterval(() => {
-      if (statusData && (statusData.status === 'ready_for_fusion' || statusData.status === 'failed')) {
+      if (statusData && (statusData.status === 'fusion_complete' || (statusData.has_fusion_report && fusionReport) || statusData.status === 'failed')) {
         clearInterval(interval);
         return;
       }
@@ -70,7 +107,7 @@ export function StatusTracker({ sessionId, onReset }) {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [sessionId, statusData?.status]);
+  }, [sessionId, statusData?.status, Boolean(fusionReport)]);
 
   const copySessionId = () => {
     navigator.clipboard.writeText(sessionId);
@@ -112,6 +149,12 @@ export function StatusTracker({ sessionId, onReset }) {
             <CheckCircle2 size={12} /> Speech & Visual Complete (Ready for Fusion)
           </span>
         );
+      case 'fusion_complete':
+        return (
+          <span className="badge-pill" style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <CheckCircle2 size={12} /> Complete Coaching Analysis Ready
+          </span>
+        );
       case 'failed':
         return (
           <span className="badge-pill" style={{ background: '#fef2f2', color: '#dc2626' }}>
@@ -123,14 +166,16 @@ export function StatusTracker({ sessionId, onReset }) {
     }
   };
 
-  const frameList = statusData?.frame_count
-    ? Array.from({ length: Math.min(statusData.frame_count, 12) }, (_, i) => {
+  const totalFrames = statusData?.frame_count || 0;
+  const displayedCount = showAllFrames ? totalFrames : Math.min(totalFrames, 12);
+  const frameList = totalFrames > 0
+    ? Array.from({ length: displayedCount }, (_, i) => {
       const frameNum = String(i + 1).padStart(4, '0');
       return `/data/processed/${sessionId}/frames/frame_${frameNum}.jpg`;
     })
     : [];
 
-  const isProcessedOrAnalyzed = statusData?.status === 'processed' || statusData?.status === 'speech_analysis_complete' || statusData?.status === 'visual_analysis_complete' || statusData?.status === 'ready_for_fusion' || statusData?.has_speech_analysis || statusData?.has_visual_analysis;
+  const isProcessedOrAnalyzed = statusData?.status === 'processed' || statusData?.status === 'speech_analysis_complete' || statusData?.status === 'visual_analysis_complete' || statusData?.status === 'ready_for_fusion' || statusData?.status === 'fusion_complete' || statusData?.has_speech_analysis || statusData?.has_visual_analysis || statusData?.has_fusion_report || Boolean(fusionReport);
 
   return (
     <div className="pro-card">
@@ -237,12 +282,42 @@ export function StatusTracker({ sessionId, onReset }) {
                 {getStatusBadge(statusData.status)}
               </div>
 
-              {statusData.status === 'processing' && (
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <RefreshCw size={14} className="animate-spin" color="var(--primary-purple)" />
-                  <span>Processing audio extraction & Whisper STT speech analysis...</span>
-                </div>
-              )}
+              {statusData.status === 'processing' && (() => {
+                const stageLabels = {
+                  processing: 'Extracting audio & video frames...',
+                  analyzing: 'Running speech & visual analysis...',
+                  fusion: 'Building your fusion report...',
+                };
+                const bars = [
+                  { key: 'speech_progress', label: 'Speech', data: statusData.speech_progress },
+                  { key: 'visual_progress', label: 'Visual', data: statusData.visual_progress },
+                ].filter((b) => b.data && typeof b.data.percent === 'number');
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <RefreshCw size={14} className="animate-spin" color="var(--primary-purple)" />
+                      <span>{stageLabels[statusData.progress_stage] || 'Processing your video...'}</span>
+                    </div>
+                    {bars.map(({ key, label, data }) => (
+                      <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '52px' }}>{label}</span>
+                        <div style={{ flex: 1, height: '6px', background: 'var(--border-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{
+                            width: `${Math.min(100, Math.max(2, data.percent))}%`,
+                            height: '100%',
+                            background: 'linear-gradient(90deg, var(--primary-purple), #a78bfa)',
+                            borderRadius: '3px',
+                            transition: 'width 0.6s ease',
+                          }} />
+                        </div>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', minWidth: '110px' }}>
+                          {Math.round(data.percent)}%{data.detail ? ` — ${data.detail}` : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Error Banner */}
@@ -265,6 +340,163 @@ export function StatusTracker({ sessionId, onReset }) {
                 <button onClick={onReset} className="btn-light" style={{ background: '#ffffff', borderColor: '#fca5a5' }}>
                   <span>Try Uploading Again</span>
                 </button>
+              </div>
+            )}
+
+            {/* Overall Performance & SmartSpeak Index Hero Card */}
+            {fusionReport && (
+              <div style={{
+                background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4338ca 100%)',
+                color: '#ffffff',
+                borderRadius: 'var(--radius-xl, 16px)',
+                padding: '24px 28px',
+                marginBottom: '24px',
+                boxShadow: '0 10px 25px -5px rgba(67, 56, 202, 0.3)',
+                position: 'relative',
+                overflow: 'hidden'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
+                  {/* Left: Overall Score and Grade */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
+                    <div style={{
+                      width: '88px',
+                      height: '88px',
+                      borderRadius: '50%',
+                      background: 'rgba(255, 255, 255, 0.12)',
+                      border: '3px solid rgba(255, 255, 255, 0.35)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      <span style={{ fontSize: '1.9rem', fontWeight: 800, lineHeight: 1 }}>
+                        {Math.round(fusionReport.smartspeak_index)}
+                      </span>
+                      <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.8, marginTop: '2px' }}>
+                        Score / 100
+                      </span>
+                    </div>
+
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <h3 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0, letterSpacing: '-0.01em' }}>
+                          Overall Performance Score
+                        </h3>
+                        <span style={{
+                          padding: '4px 12px',
+                          borderRadius: '20px',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          letterSpacing: '0.04em',
+                          textTransform: 'uppercase',
+                          background: fusionReport.grade === 'Executive' ? '#10b981' :
+                                      fusionReport.grade === 'Polished' ? '#3b82f6' :
+                                      fusionReport.grade === 'Competent' ? '#8b5cf6' : '#f59e0b',
+                          color: '#ffffff'
+                        }}>
+                          {fusionReport.grade}
+                        </span>
+                      </div>
+                      <p style={{ margin: '6px 0 0 0', fontSize: '0.88rem', color: 'rgba(255, 255, 255, 0.82)' }}>
+                        Composite SmartSpeak Index evaluating verbal pacing, physical presence & confidence
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Right: Sub-Score Badges */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      backdropFilter: 'blur(8px)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      borderRadius: '12px',
+                      padding: '10px 16px',
+                      textAlign: 'center',
+                      minWidth: '105px'
+                    }}>
+                      <span style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgba(255, 255, 255, 0.7)' }}>
+                        Verbal (40%)
+                      </span>
+                      <strong style={{ fontSize: '1.25rem', fontWeight: 800, color: '#a7f3d0' }}>
+                        {fusionReport.verbal_score}%
+                      </strong>
+                    </div>
+
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      backdropFilter: 'blur(8px)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      borderRadius: '12px',
+                      padding: '10px 16px',
+                      textAlign: 'center',
+                      minWidth: '105px'
+                    }}>
+                      <span style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgba(255, 255, 255, 0.7)' }}>
+                        Non-Verbal (40%)
+                      </span>
+                      <strong style={{ fontSize: '1.25rem', fontWeight: 800, color: '#bfdbfe' }}>
+                        {fusionReport.non_verbal_score}%
+                      </strong>
+                    </div>
+
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      backdropFilter: 'blur(8px)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      borderRadius: '12px',
+                      padding: '10px 16px',
+                      textAlign: 'center',
+                      minWidth: '105px'
+                    }}>
+                      <span style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgba(255, 255, 255, 0.7)' }}>
+                        Confidence (20%)
+                      </span>
+                      <strong style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ddd6fe' }}>
+                        {fusionReport.ml_confidence_score}%
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Behavioral Cues & Feedback */}
+                {fusionReport.mistakes && fusionReport.mistakes.length > 0 && (
+                  <div style={{
+                    marginTop: '18px',
+                    paddingTop: '16px',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.15)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'rgba(255, 255, 255, 0.75)', fontWeight: 700 }}>
+                      Key Behavioral Feedback ({fusionReport.mistakes.length} moments identified)
+                    </span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {fusionReport.mistakes.slice(0, 5).map((m, idx) => (
+                        <div key={idx} style={{
+                          background: 'rgba(0, 0, 0, 0.25)',
+                          borderRadius: '8px',
+                          padding: '6px 12px',
+                          fontSize: '0.8rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          border: '1px solid rgba(255, 255, 255, 0.1)'
+                        }}>
+                          <span style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            background: m.severity === 'high' ? '#f87171' : m.severity === 'medium' ? '#fbbf24' : '#60a5fa'
+                          }} />
+                          <span>{m.description}</span>
+                          <span style={{ opacity: 0.6, fontSize: '0.72rem' }}>@{m.timestamp.toFixed(1)}s</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -326,22 +558,124 @@ export function StatusTracker({ sessionId, onReset }) {
                     borderRadius: 'var(--radius-lg)',
                     padding: '18px'
                   }}>
-                    <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Film size={16} color="var(--primary-purple)" />
-                      <span>Extracted Frame Previews</span>
-                    </h4>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                        <Film size={16} color="var(--primary-purple)" />
+                        <span>Extracted Frame Previews ({displayedCount} of {totalFrames} frames)</span>
+                      </h4>
+                      {totalFrames > 12 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllFrames(!showAllFrames)}
+                          style={{
+                            background: showAllFrames ? 'var(--primary-purple)' : 'rgba(109, 40, 217, 0.08)',
+                            color: showAllFrames ? '#ffffff' : 'var(--primary-purple)',
+                            border: '1px solid var(--primary-purple)',
+                            borderRadius: '6px',
+                            padding: '4px 12px',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          {showAllFrames ? `Show Preview (12 Frames)` : `View All ${totalFrames} Frames`}
+                        </button>
+                      )}
+                    </div>
 
-                    <div className="frames-grid">
+                    <div className="frames-grid" style={{ maxHeight: showAllFrames ? '480px' : 'none', overflowY: showAllFrames ? 'auto' : 'visible', paddingRight: showAllFrames ? '6px' : '0' }}>
                       {frameList.map((src, idx) => (
-                        <div key={idx} className="frame-thumb">
+                        <div
+                          key={idx}
+                          className="frame-thumb"
+                          onClick={() => setSelectedFrameSrc(src)}
+                          title={`Click to enlarge frame #${idx + 1}`}
+                          style={{ cursor: 'pointer' }}
+                        >
                           <img
                             src={src}
                             alt={`Frame ${idx + 1}`}
+                            loading="lazy"
                             onError={(e) => { e.target.style.display = 'none'; }}
                           />
                           <span className="frame-badge">#{String(idx + 1).padStart(4, '0')}</span>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Lightbox Modal for Enlarged Frame */}
+                {selectedFrameSrc && (
+                  <div
+                    onClick={() => setSelectedFrameSrc(null)}
+                    style={{
+                      position: 'fixed',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      backgroundColor: 'rgba(15, 23, 42, 0.88)',
+                      backdropFilter: 'blur(4px)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 9999,
+                      padding: '24px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        position: 'relative',
+                        maxWidth: '92vw',
+                        maxHeight: '88vh',
+                        background: '#000000',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+                        border: '1px solid #334155'
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFrameSrc(null)}
+                        style={{
+                          position: 'absolute',
+                          top: '10px',
+                          right: '10px',
+                          background: 'rgba(15, 23, 42, 0.8)',
+                          color: '#ffffff',
+                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                          borderRadius: '50%',
+                          width: '32px',
+                          height: '32px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '18px',
+                          cursor: 'pointer',
+                          lineHeight: 1,
+                          zIndex: 10
+                        }}
+                      >
+                        ✕
+                      </button>
+                      <img
+                        src={selectedFrameSrc}
+                        alt="Enlarged preview"
+                        style={{
+                          display: 'block',
+                          maxWidth: '90vw',
+                          maxHeight: '82vh',
+                          objectFit: 'contain'
+                        }}
+                      />
                     </div>
                   </div>
                 )}

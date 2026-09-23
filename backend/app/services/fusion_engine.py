@@ -548,8 +548,10 @@ async def process_fusion_session(session_id: str) -> bool:
                 "$set": {
                     "fusion_report": fusion_dict,
                     "status": SessionStatus.FUSION_COMPLETE,
-                    "error_reason": None
-                }
+                    "error_reason": None,
+                    "progress_stage": "done"
+                },
+                "$unset": {"speech_progress": "", "visual_progress": ""}
             }
         )
 
