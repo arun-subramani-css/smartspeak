@@ -100,6 +100,12 @@ class PostureData(BaseModel):
     no_detection_frame_count: int = 0
 
 
+class GestureRange(BaseModel):
+    start_time: float
+    end_time: float
+    duration: float
+
+
 class GestureData(BaseModel):
     gesture_frequency_count: int
     active_hand_percentage: float
@@ -107,6 +113,8 @@ class GestureData(BaseModel):
     average_detection_confidence: float | None = None
     fallback_frame_count: int = 0
     no_detection_frame_count: int = 0
+    gesture_active_ranges: list[GestureRange] = []
+    session_duration_seconds: float = 0.0
 
 
 class HeadMovementData(BaseModel):
@@ -153,6 +161,7 @@ class FusionReportResult(BaseModel):
     verbal_score: float
     non_verbal_score: float
     ml_confidence_score: float
+    speech_gesture_correlation: list[MistakeItem] = []
     analyzed_at: datetime
 
 

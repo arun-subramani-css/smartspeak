@@ -499,6 +499,86 @@ def compute_composite_scores(
     }
 
 
+def correlate_speech_and_gestures(
+    speech_analysis: Optional[Dict[str, Any]],
+    visual_analysis: Optional[Dict[str, Any]],
+    max_insights: int = 12,
+) -> List[MistakeItem]:
+    """
+    Cross-modal correlation between hand gestures and speech fluency.
+
+    For each contiguous gesture-active segment, checks whether speech in and
+    around it was fluent or struggled (filler words / long pauses), producing
+    coaching insights:
+      - gestures + several fillers  → "gesturing while verbal fluency drops"
+      - gestures + overlapping pauses → "hands emphasize while speech stalls"
+      - gestures + clean speech     → positive reinforcement (well-timed)
+    """
+    if not speech_analysis or not visual_analysis:
+        return []
+
+    gesture_data = visual_analysis.get("gesture", {}) or {}
+    ranges = gesture_data.get("gesture_active_ranges") or []
+    if not ranges:
+        return []
+
+    filler_ts = [
+        float(fw.get("timestamp", 0.0))
+        for fw in (speech_analysis.get("filler_words") or [])
+    ]
+    pause_spans = [
+        (float(p.get("start_time", 0.0)), float(p.get("end_time", 0.0)))
+        for p in (speech_analysis.get("long_pauses") or [])
+    ]
+
+    window = 2.0  # seconds of tolerance around each gesture segment
+    insights: List[MistakeItem] = []
+
+    for r in ranges:
+        s = float(r.get("start_time", 0.0))
+        e = float(r.get("end_time", 0.0))
+        fillers_near = sum(1 for t in filler_ts if (s - window) <= t <= (e + window))
+        pauses_near = sum(
+            1 for (ps, pe) in pause_spans if ps <= (e + window) and pe >= (s - window)
+        )
+
+        if fillers_near >= 3:
+            insights.append(MistakeItem(
+                timestamp=round((s + e) / 2, 2),
+                category="compound",
+                description=(
+                    f"Gesturing while verbal fluency drops: {fillers_near} filler "
+                    "words during an active gesture segment"
+                ),
+                severity="medium" if fillers_near >= 5 else "minor",
+                events=["gesture_active", "filler_words"],
+            ))
+        elif pauses_near >= 2:
+            insights.append(MistakeItem(
+                timestamp=round((s + e) / 2, 2),
+                category="compound",
+                description=(
+                    f"Hands emphasize while speech stalls: {pauses_near} long "
+                    "pauses overlap this gesture segment"
+                ),
+                severity="minor",
+                events=["gesture_active", "long_pause"],
+            ))
+        else:
+            insights.append(MistakeItem(
+                timestamp=round((s + e) / 2, 2),
+                category="compound",
+                description="Well-timed gestures aligned with fluent speech",
+                severity="minor",
+                events=["gesture_active", "fluent"],
+            ))
+
+        if len(insights) >= max_insights:
+            break
+
+    return insights
+
+
 def generate_fusion_report_sync(
     speech_analysis: Optional[Dict[str, Any]],
     visual_analysis: Optional[Dict[str, Any]],
@@ -507,6 +587,7 @@ def generate_fusion_report_sync(
     """Synchronously creates the complete FusionReportResult."""
     mistakes = detect_mistakes(speech_analysis, visual_analysis)
     scores = compute_composite_scores(speech_analysis, visual_analysis, confidence_analysis)
+    speech_gesture_correlation = correlate_speech_and_gestures(speech_analysis, visual_analysis)
 
     return FusionReportResult(
         mistakes=mistakes,
@@ -515,6 +596,7 @@ def generate_fusion_report_sync(
         verbal_score=scores["verbal_score"],
         non_verbal_score=scores["non_verbal_score"],
         ml_confidence_score=scores["ml_confidence_score"],
+        speech_gesture_correlation=speech_gesture_correlation,
         analyzed_at=datetime.now(timezone.utc)
     )
 

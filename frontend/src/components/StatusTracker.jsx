@@ -3,6 +3,30 @@ import {
   RefreshCw, CheckCircle2, Clock, AlertTriangle, Music, Image as ImageIcon,
   Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2, Award, TrendingUp
 } from 'lucide-react';
+import { TimelineChart } from './TimelineChart';
+
+function scoreColor(v) {
+  if (v >= 70) return '#10b981';
+  if (v >= 40) return '#f59e0b';
+  return '#ef4444';
+}
+
+/** Thin colored progress bar under a metric value. */
+function MetricBar({ value, color }) {
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  const c = color || scoreColor(v);
+  return (
+    <div style={{ height: '5px', background: 'var(--border-subtle)', borderRadius: '3px', overflow: 'hidden', marginTop: '10px' }}>
+      <div style={{
+        width: `${v}%`,
+        height: '100%',
+        background: `linear-gradient(90deg, ${c}, ${c}aa)`,
+        borderRadius: '3px',
+        transition: 'width 0.6s ease',
+      }} />
+    </div>
+  );
+}
 
 export function StatusTracker({ sessionId, onReset }) {
   const [statusData, setStatusData] = useState(null);
@@ -497,6 +521,43 @@ export function StatusTracker({ sessionId, onReset }) {
                     </div>
                   </div>
                 )}
+
+                {/* Gesture ↔ Speech Correlation Insights */}
+                {fusionReport.speech_gesture_correlation && fusionReport.speech_gesture_correlation.length > 0 && (
+                  <div style={{
+                    marginTop: '14px',
+                    paddingTop: '14px',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.15)'
+                  }}>
+                    <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'rgba(255, 255, 255, 0.75)', fontWeight: 700 }}>
+                      Gesture ↔ Speech Correlation ({fusionReport.speech_gesture_correlation.length})
+                    </span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+                      {fusionReport.speech_gesture_correlation.slice(0, 6).map((c, i) => (
+                        <div key={i} style={{
+                          background: 'rgba(0, 0, 0, 0.25)',
+                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          borderRadius: '8px',
+                          padding: '6px 12px',
+                          fontSize: '0.8rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}>
+                          <span style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            flexShrink: 0,
+                            background: c.events?.includes('fluent') ? '#34d399' : (c.severity === 'medium' ? '#fbbf24' : '#60a5fa')
+                          }} />
+                          <span>{c.description}</span>
+                          <span style={{ opacity: 0.6, fontSize: '0.72rem' }}>@{Number(c.timestamp).toFixed(1)}s</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -680,6 +741,15 @@ export function StatusTracker({ sessionId, onReset }) {
                   </div>
                 )}
 
+                {/* SESSION TIMELINE OVERVIEW */}
+                {speechAnalysis && visualAnalysis && (
+                  <TimelineChart
+                    speechAnalysis={speechAnalysis}
+                    visualAnalysis={visualAnalysis}
+                    fusionReport={fusionReport}
+                  />
+                )}
+
                 {/* SPEECH ANALYSIS DASHBOARD RESULTS */}
                 {speechAnalysis && (
                   <div style={{
@@ -821,7 +891,7 @@ export function StatusTracker({ sessionId, onReset }) {
                                   textAlign: 'center',
                                   flexShrink: 0
                                 }}>
-                                  <div style={{ fontWeight: 700, color: 'var(--primary-purple)' }}>{win.wpm}</div>
+                                  <div style={{ fontWeight: 700, color: win.wpm >= 110 && win.wpm <= 160 ? '#059669' : (win.wpm > 0 ? '#d97706' : 'var(--text-muted)') }}>{win.wpm}</div>
                                   <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>{win.window_start}s-{win.window_end}s</div>
                                 </div>
                               ))}
@@ -840,7 +910,7 @@ export function StatusTracker({ sessionId, onReset }) {
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
                           <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <Clock size={18} color="#2563eb" />
-                            <span>Long Pauses </span>
+                            <span>Long Pauses</span>
                           </h4>
                           <span className="badge-pill">
                             {speechAnalysis.long_pauses?.length || 0} Pauses
@@ -867,7 +937,7 @@ export function StatusTracker({ sessionId, onReset }) {
                           </div>
                         ) : (
                           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                            No long pauses ($\ge 3.0$ seconds) detected. Good speech flow!
+                            No long pauses (≥ 3.0 seconds) detected. Good speech flow!
                           </p>
                         )}
                       </div>
@@ -954,6 +1024,7 @@ export function StatusTracker({ sessionId, onReset }) {
                               : 'N/A'}
                           </span>
                         </p>
+                        <MetricBar value={visualAnalysis.eye_contact?.eye_contact_percentage} color="#0369a1" />
                       </div>
 
                       {/* Posture Card */}
@@ -972,6 +1043,7 @@ export function StatusTracker({ sessionId, onReset }) {
                               : 'N/A'}
                           </span>
                         </p>
+                        <MetricBar value={visualAnalysis.posture?.posture_score} color="#059669" />
                       </div>
 
                       {/* Gesture Usage Card */}
@@ -990,6 +1062,10 @@ export function StatusTracker({ sessionId, onReset }) {
                               : 'N/A'}
                           </span>
                         </p>
+                        <MetricBar
+                          value={visualAnalysis.gesture?.active_hand_percentage}
+                          color={visualAnalysis.gesture?.gesture_usage_classification === 'average' ? '#059669' : '#f59e0b'}
+                        />
                       </div>
 
                       {/* Head Movement Card */}
@@ -1003,6 +1079,7 @@ export function StatusTracker({ sessionId, onReset }) {
                         <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
                           Rapid Movement Triggers: <strong>{visualAnalysis.head_movement?.excessive_movement_count}</strong>
                         </p>
+                        <MetricBar value={visualAnalysis.head_movement?.head_movement_score} color="#7c3aed" />
                       </div>
                     </div>
                   </div>

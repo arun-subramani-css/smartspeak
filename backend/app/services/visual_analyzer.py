@@ -110,6 +110,7 @@ from app.models.session import (
     EyeContactData,
     EyeContactRange,
     GestureData,
+    GestureRange,
     HeadMovementData,
     PostureData,
     PostureRange,
@@ -664,6 +665,7 @@ def analyze_posture_and_gestures_sync(frames_dir: Path, confidence_results: list
 
     posture_records = []  # (timestamp, "good" | "poor")
     active_hand_frames = 0
+    gesture_active_timestamps = []  # per-frame gesture activity for range merging
 
     shoulder_threshold = settings.POSTURE_SHOULDER_TILT_THRESHOLD
     spine_threshold = settings.POSTURE_SPINE_ANGLE_THRESHOLD
@@ -954,6 +956,7 @@ def analyze_posture_and_gestures_sync(frames_dir: Path, confidence_results: list
 
         if is_gesturing:
             active_hand_frames += 1
+            gesture_active_timestamps.append(timestamp)
 
         if progress_cb and (idx % 25 == 0 or idx == len(frame_paths) - 1):
             progress_cb(min(95.0, 100.0 * (idx + 1) / max(1, len(frame_paths))), f"frame {idx + 1}/{len(frame_paths)}")
@@ -1034,21 +1037,46 @@ def analyze_posture_and_gestures_sync(frames_dir: Path, confidence_results: list
     # Aggregate Gesture Data
     active_pct = round((active_hand_frames / total_frames) * 100.0, 2)
     if active_pct < settings.GESTURE_TOO_FEW_THRESHOLD_PCT:
-        gesture_usage = "too_few"
+        g_class = "too_few"
     elif active_pct > settings.GESTURE_TOO_MANY_THRESHOLD_PCT:
-        gesture_usage = "too_many"
+        g_class = "too_many"
     else:
-        gesture_usage = "average"
+        g_class = "average"
 
     avg_hand_confidence = round(sum(hand_confidences) / len(hand_confidences), 4) if hand_confidences else None
+
+    # Merge active-gesture timestamps into contiguous ranges (gap <= 2.5s),
+    # mirroring the ranges exposed for eye contact and posture.
+    gesture_active_ranges: List[GestureRange] = []
+    g_start: Optional[float] = None
+    g_last: float = 0.0
+    for ts in gesture_active_timestamps:
+        if g_start is None:
+            g_start = ts
+        elif ts - g_last > 2.5:
+            gesture_active_ranges.append(GestureRange(
+                start_time=g_start,
+                end_time=g_last,
+                duration=round(g_last - g_start + 1.0, 2),
+            ))
+            g_start = ts
+        g_last = ts
+    if g_start is not None:
+        gesture_active_ranges.append(GestureRange(
+            start_time=g_start,
+            end_time=g_last,
+            duration=round(g_last - g_start + 1.0, 2),
+        ))
 
     gesture_data = GestureData(
         gesture_frequency_count=active_hand_frames,
         active_hand_percentage=active_pct,
-        gesture_usage_classification=gesture_usage,
+        gesture_usage_classification=g_class,
         average_detection_confidence=avg_hand_confidence,
         fallback_frame_count=fallback_hand_count,
-        no_detection_frame_count=no_detection_hand_count
+        no_detection_frame_count=no_detection_hand_count,
+        gesture_active_ranges=gesture_active_ranges,
+        session_duration_seconds=float(total_frames),
     )
 
     if confidence_results is not None:
