@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { VideoUploader } from './components/VideoUploader';
 import { StatusTracker } from './components/StatusTracker';
+import { RecentReports } from './components/RecentReports';
 import { Sparkles, Check } from 'lucide-react';
 
 export default function App() {
@@ -89,7 +90,10 @@ export default function App() {
 
         {/* Ingestion Card / Status Tracker */}
         {!currentSessionId ? (
-          <VideoUploader onUploadSuccess={handleUploadSuccess} />
+          <>
+            <VideoUploader onUploadSuccess={handleUploadSuccess} />
+            <RecentReports onOpenSession={setCurrentSessionId} />
+          </>
         ) : (
           <StatusTracker sessionId={currentSessionId} onReset={handleReset} />
         )}

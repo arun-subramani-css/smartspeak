@@ -146,6 +146,24 @@ class ConfidenceAnalysisResponse(BaseModel):
 
 # --- Fusion & Mistake Detection Models ---
 
+class SessionSummary(BaseModel):
+    """Lightweight per-session summary for the history/list views."""
+    session_id: str
+    original_filename: str
+    upload_timestamp: datetime
+    status: str
+    file_size: int
+    content_type: str = "video/mp4"
+    has_fusion_report: bool = False
+    smartspeak_index: float | None = None
+    grade: str | None = None
+
+
+class SessionHistoryResponse(BaseModel):
+    sessions: list[SessionSummary] = []
+    total: int = 0
+
+
 class MistakeItem(BaseModel):
     timestamp: float
     category: str  # "speech", "visual", "compound"

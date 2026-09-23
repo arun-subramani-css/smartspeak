@@ -15,9 +15,18 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 
 def train_and_evaluate():
-    root_dir = r"D:\project\smart speak"
+    # Project root = two levels above this script (backend/scripts/ -> repo root).
+    # Override with POSTURE_TRAIN_ROOT env var if the dataset lives elsewhere.
+    root_dir = os.environ.get("POSTURE_TRAIN_ROOT") or os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..")
+    )
     csv_path = os.path.join(root_dir, "human_verification", "human_verified_posture_labels.csv")
-    models_dir = os.path.join(root_dir, "models")
+    models_dir = os.environ.get("POSTURE_TRAIN_MODELS_DIR") or os.path.join(root_dir, "models")
+    if not os.path.exists(csv_path):
+        # Fallback: dataset committed at repo root
+        alt_csv = os.path.join(root_dir, "human_verified_posture_labels.csv")
+        if os.path.exists(alt_csv):
+            csv_path = alt_csv
     os.makedirs(models_dir, exist_ok=True)
 
     print("=================================================================")

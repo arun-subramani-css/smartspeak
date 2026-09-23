@@ -1,11 +1,53 @@
 import logging
+from typing import Optional
 from fastapi import APIRouter, HTTPException, status
 from app.db.mongodb import MongoDB
-from app.models.session import StatusResponse
+from app.models.session import StatusResponse, SessionHistoryResponse, SessionSummary
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["Sessions"])
+
+
+@router.get("/history", response_model=SessionHistoryResponse)
+async def list_session_history(
+    limit: int = 25,
+    completed_only: bool = False,
+    filename: Optional[str] = None,
+):
+    """
+    Lists recent sessions for the history view, newest first.
+
+    - limit: max number of sessions to return (default 25)
+    - completed_only: only sessions with a fusion report
+    - filename: case-insensitive substring filter on the original filename
+    """
+    sessions_col = MongoDB.get_collection("sessions")
+    cursor = sessions_col.find({}).sort("upload_timestamp", -1).limit(max(1, min(limit, 100)))
+    docs = await cursor.to_list(None)
+
+    summaries = []
+    needle = (filename or "").lower()
+    for doc in docs:
+        if needle and needle not in str(doc.get("original_filename", "")).lower():
+            continue
+        has_fusion = doc.get("fusion_report") is not None
+        if completed_only and not has_fusion:
+            continue
+        fusion = doc.get("fusion_report") or {}
+        summaries.append(SessionSummary(
+            session_id=doc.get("session_id", ""),
+            original_filename=doc.get("original_filename", ""),
+            upload_timestamp=doc.get("upload_timestamp"),
+            status=doc.get("status", "unknown"),
+            file_size=int(doc.get("file_size") or 0),
+            content_type=doc.get("content_type", "video/mp4"),
+            has_fusion_report=has_fusion,
+            smartspeak_index=fusion.get("smartspeak_index"),
+            grade=fusion.get("grade"),
+        ))
+
+    return SessionHistoryResponse(sessions=summaries, total=len(summaries))
 
 
 @router.get("/{session_id}/status", response_model=StatusResponse)

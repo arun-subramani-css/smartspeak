@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     # Prewarm heavy ML models (Whisper, spaCy, confidence classifier) in a
     # background thread at startup so the first upload doesn't pay load latency.
     PREWARM_MODELS: bool = True
+    # Comma-separated list of allowed origins; "*" permits all (dev only).
+    CORS_ALLOW_ORIGINS: str = "*"
 
     # Audio Enhancement for Speech-to-Text Accuracy
     # FFmpeg filter chain applied to the extracted WAV before Whisper runs.
