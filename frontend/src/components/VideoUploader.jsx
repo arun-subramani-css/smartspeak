@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileVideo, AlertCircle, Shield, Film, Waves, CheckCircle2, X, Loader2, ArrowRight } from 'lucide-react';
+import { Upload, FileVideo, AlertCircle, Shield, Film, Waves, CheckCircle2, X, Loader2, ArrowRight, Video } from 'lucide-react';
+import { PracticeRecorder } from './PracticeRecorder';
 
 const MAX_SIZE_MB = 500;
-const ALLOWED_EXTENSIONS = ['.mp4', '.avi', '.mov'];
+const ALLOWED_EXTENSIONS = ['.mp4', '.avi', '.mov', '.webm'];
 
 export function VideoUploader({ onUploadSuccess }) {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -10,6 +11,7 @@ export function VideoUploader({ onUploadSuccess }) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [dragActive, setDragActive] = useState(false);
+  const [mode, setMode] = useState('upload'); // 'upload' | 'practice'
   const fileInputRef = useRef(null);
 
   const validateFile = (file) => {
@@ -17,7 +19,7 @@ export function VideoUploader({ onUploadSuccess }) {
 
     const ext = '.' + file.name.split('.').pop().toLowerCase();
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      return `Unsupported file format '${ext}'. Please upload an .MP4, .AVI, or .MOV video file.`;
+      return `Unsupported file format '${ext}'. Please upload an .MP4, .AVI, .MOV, or .WEBM video file.`;
     }
 
     const sizeMB = file.size / (1024 * 1024);
@@ -70,10 +72,11 @@ export function VideoUploader({ onUploadSuccess }) {
     }
   };
 
-  const handleUpload = () => {
-    if (!selectedFile) return;
+  const handleUpload = (fileOverride) => {
+    const fileToUpload = fileOverride || selectedFile;
+    if (!fileToUpload) return;
 
-    const validationError = validateFile(selectedFile);
+    const validationError = validateFile(fileToUpload);
     if (validationError) {
       setErrorMessage(validationError);
       return;
@@ -84,7 +87,7 @@ export function VideoUploader({ onUploadSuccess }) {
     setErrorMessage('');
 
     const formData = new FormData();
-    formData.append('video', selectedFile);
+    formData.append('video', fileToUpload);
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/v1/upload', true);
@@ -166,24 +169,75 @@ export function VideoUploader({ onUploadSuccess }) {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <span className="badge-pill">MAX 500 MB</span>
-          <span className="badge-pill">.MP4 / .AVI / .MOV</span>
+          <span className="badge-pill">.MP4 / .AVI / .MOV / .WEBM</span>
         </div>
       </div>
 
       <div className="pro-card-body">
+        {/* Mode toggle */}
+        {!selectedFile && !isUploading && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setMode('upload')}
+              aria-pressed={mode === 'upload'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 16px', borderRadius: 999, fontSize: '0.82rem', fontWeight: 700,
+                cursor: 'pointer', transition: 'all 0.15s ease',
+                border: `1px solid ${mode === 'upload' ? 'var(--primary-purple)' : 'var(--border-subtle)'}`,
+                background: mode === 'upload' ? 'var(--primary-purple-light)' : '#ffffff',
+                color: mode === 'upload' ? 'var(--primary-purple)' : 'var(--text-muted)',
+              }}
+            >
+              <Upload size={14} />
+              Upload a file
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('practice')}
+              aria-pressed={mode === 'practice'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 16px', borderRadius: 999, fontSize: '0.82rem', fontWeight: 700,
+                cursor: 'pointer', transition: 'all 0.15s ease',
+                border: `1px solid ${mode === 'practice' ? 'var(--primary-purple)' : 'var(--border-subtle)'}`,
+                background: mode === 'practice' ? 'var(--primary-purple-light)' : '#ffffff',
+                color: mode === 'practice' ? 'var(--primary-purple)' : 'var(--text-muted)',
+              }}
+            >
+              <Video size={14} />
+              Practice now
+            </button>
+          </div>
+        )}
+
         {/* Hidden File Input */}
         <input
           type="file"
           ref={fileInputRef}
           onChange={handleFileChange}
-          accept=".mp4,.avi,.mov"
+          accept=".mp4,.avi,.mov,.webm"
           style={{ display: 'none' }}
         />
 
+        {/* Practice Mode — record in browser, then reuse the exact upload flow */}
+        {mode === 'practice' && !selectedFile && (
+          <PracticeRecorder
+            onRecordingReady={(file) => {
+              setMode('upload');
+              setSelectedFile(file);
+              setErrorMessage('');
+              handleUpload(file); // straight into the existing flow
+            }}
+            onCancel={() => setMode('upload')}
+          />
+        )}
+
         {/* Dropzone */}
-        {!selectedFile ? (
+        {mode === 'upload' && !selectedFile && (
           <div
             className={`exact-dropzone ${dragActive ? 'active' : ''}`}
             onDragEnter={handleDrag}
@@ -226,7 +280,10 @@ export function VideoUploader({ onUploadSuccess }) {
               Tip: frame yourself from the waist up, with good lighting and minimal background noise, for the most accurate analysis.
             </p>
           </div>
-        ) : (
+        )}
+
+        {/* Selected file card (both modes — practice sets the recorded file here too) */}
+        {selectedFile && (
           <div style={{
             background: 'var(--bg-subtle)',
             border: '1px solid var(--border-subtle)',

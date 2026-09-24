@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     STORAGE_DIR: str = "./data"
     MODELS_DIR: str | None = None
     MAX_UPLOAD_SIZE_MB: int = 500
-    ALLOWED_EXTENSIONS: list[str] = [".mp4", ".avi", ".mov"]
+    ALLOWED_EXTENSIONS: list[str] = [".mp4", ".avi", ".mov", ".webm"]
     FRAME_SAMPLE_RATE_FPS: float = 1.0
     RETENTION_DAYS: int = 30
     CLEANUP_INTERVAL_HOURS: int = 24

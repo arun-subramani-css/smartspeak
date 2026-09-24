@@ -15,13 +15,19 @@ def is_valid_extension(filename: str | None) -> bool:
 
 def validate_container_header(header_bytes: bytes, filename: str) -> bool:
     """
-    Validates actual binary container signature of MP4, AVI, and MOV files.
+    Validates actual binary container signature of MP4, AVI, MOV, and WebM files.
     Rejects text files, images, or fake extension files.
     """
     if len(header_bytes) < 12:
         return False
 
     ext = Path(filename).suffix.lower()
+
+    # WebM container validation (EBML header — also what browsers' MediaRecorder
+    # produces, enabling the in-browser "Practice now" recording flow)
+    if ext == ".webm":
+        if header_bytes[0:4] == b"\x1a\x45\xdf\xa3":
+            return True
 
     # MP4 & MOV container validation (ISO Base Media File Format)
     if ext in [".mp4", ".mov"]:
@@ -61,7 +67,7 @@ async def validate_upload_file(file: UploadFile) -> str:
     if ext not in VALID_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file format '{ext}'. Only .mp4, .avi, and .mov files are allowed."
+            detail=f"Unsupported file format '{ext}'. Only .mp4, .avi, .mov, and .webm files are allowed."
         )
 
     # 2. Container signature header check
