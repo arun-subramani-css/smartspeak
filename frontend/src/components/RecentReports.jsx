@@ -73,24 +73,20 @@ export function RecentReports({ onOpenSession }) {
   if (failed || !sessions || sessions.length === 0) return null;
 
   return (
-    <div className="animate-fade-in" style={{
-      maxWidth: 680, margin: '32px auto 0',
-      background: '#ffffff',
-      border: '1px solid var(--border-subtle)',
-      borderRadius: 'var(--radius-lg)',
-      padding: '18px 20px',
-      textAlign: 'left',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <History size={17} color="var(--primary-purple)" />
-        <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-          Recent Reports
-        </h3>
-        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-          click to reopen
+    <div className="pro-card animate-fade-in" style={{ marginTop: 24 }}>
+      <div className="pro-card-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <History size={17} color="var(--primary-purple)" />
+          <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+            Recent Reports
+          </h3>
+        </div>
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+          click a report to reopen it
         </span>
       </div>
 
+      <div className="pro-card-body" style={{ paddingTop: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {sessions.map((s, i) => (
           <button
@@ -147,6 +143,7 @@ export function RecentReports({ onOpenSession }) {
             <ChevronRight size={16} color="#94a3b8" style={{ flexShrink: 0 }} />
           </button>
         ))}
+      </div>
       </div>
     </div>
   );

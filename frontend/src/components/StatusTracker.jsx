@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   RefreshCw, CheckCircle2, Clock, AlertTriangle, Music, Image as ImageIcon,
-  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2, Award, TrendingUp
+  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2, Award, TrendingUp, Download
 } from 'lucide-react';
 import { TimelineChart } from './TimelineChart';
 
@@ -203,6 +203,14 @@ export function StatusTracker({ sessionId, onReset }) {
 
   return (
     <div className="pro-card">
+      {/* Hidden print-only report header */}
+      <div className="print-show" style={{ display: 'none', padding: '4px 0 18px', borderBottom: '2px solid #e2e8f0', marginBottom: '8px' }}>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0 }}>SmartSpeak Coaching Report</h1>
+        <p style={{ fontSize: '0.85rem', color: '#475569', margin: '4px 0 0' }}>
+          {statusData?.original_filename || 'Session'} · generated {new Date().toLocaleString()}
+        </p>
+      </div>
+
       <div className="pro-card-header">
         <div>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)' }}>
@@ -213,19 +221,27 @@ export function StatusTracker({ sessionId, onReset }) {
           </p>
         </div>
 
-        <button onClick={onReset} className="btn-light">
-          <ArrowLeft size={16} />
-          <span>Upload Another Video</span>
-        </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {fusionReport && (
+            <button onClick={() => window.print()} className="btn-purple no-print" style={{ padding: '8px 16px', fontSize: '0.875rem' }}>
+              <Download size={16} />
+              <span>Download PDF</span>
+            </button>
+          )}
+          <button onClick={onReset} className="btn-light no-print">
+            <ArrowLeft size={16} />
+            <span>Upload Another Video</span>
+          </button>
+        </div>
       </div>
 
       <div className="pro-card-body">
-        {/* Session Metadata Banner */}
-        <div style={{
+        {/* Session Metadata Banner — compact while processing */}
+        <div className="no-print" style={{
           background: 'var(--bg-subtle)',
           border: '1px solid var(--border-subtle)',
           borderRadius: 'var(--radius-lg)',
-          padding: '18px 20px',
+          padding: '14px 20px',
           marginBottom: '24px',
           display: 'flex',
           alignItems: 'center',
@@ -280,16 +296,64 @@ export function StatusTracker({ sessionId, onReset }) {
           </div>
         </div>
 
-        {/* Loading Spinner */}
+        {/* Loading Skeleton */}
         {loading && !statusData && (
-          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
-            <RefreshCw size={32} className="animate-spin" style={{ color: 'var(--primary-purple)', marginBottom: '8px' }} />
-            <p style={{ fontWeight: 500 }}>Fetching status telemetry...</p>
+          <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+            <RefreshCw size={32} className="animate-spin" style={{ color: 'var(--primary-purple)', marginBottom: '12px' }} />
+            <p style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Loading your report…</p>
+            <p style={{ fontSize: '0.82rem' }}>Fetching the latest session state.</p>
           </div>
         )}
 
         {statusData && (
           <div>
+            {/* Session banner stays visible while processing; metadata only once done */}
+            {statusData.status === 'processing' && (() => {
+              const stageLabels = {
+                processing: 'Extracting audio & video frames...',
+                analyzing: 'Running speech & visual analysis...',
+                fusion: 'Building your fusion report...',
+              };
+              const bars = [
+                { key: 'speech_progress', label: 'Speech', data: statusData.speech_progress },
+                { key: 'visual_progress', label: 'Visual', data: statusData.visual_progress },
+              ].filter((b) => b.data && typeof b.data.percent === 'number');
+              return (
+                <div style={{
+                  background: 'var(--bg-subtle)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-lg)',
+                  padding: '18px 20px',
+                  marginBottom: '24px'
+                }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: bars.length ? '12px' : '0' }}>
+                    <RefreshCw size={16} className="animate-spin" color="var(--primary-purple)" />
+                    <span>{stageLabels[statusData.progress_stage] || 'Processing your video...'}</span>
+                  </div>
+                  {bars.map(({ key, label, data }) => (
+                    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', width: '52px' }}>{label}</span>
+                      <div style={{ flex: 1, height: '6px', background: 'var(--border-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${Math.min(100, Math.max(2, data.percent))}%`,
+                          height: '100%',
+                          background: 'linear-gradient(90deg, var(--primary-purple), #a78bfa)',
+                          borderRadius: '3px',
+                          transition: 'width 0.6s ease',
+                        }} />
+                      </div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', minWidth: '110px' }}>
+                        {Math.round(data.percent)}%{data.detail ? ` — ${data.detail}` : ''}
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+                    You can keep this tab open — the report will appear here automatically.
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Status Bar */}
             <div style={{
               display: 'flex',
@@ -305,43 +369,6 @@ export function StatusTracker({ sessionId, onReset }) {
                 <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Status:</span>
                 {getStatusBadge(statusData.status)}
               </div>
-
-              {statusData.status === 'processing' && (() => {
-                const stageLabels = {
-                  processing: 'Extracting audio & video frames...',
-                  analyzing: 'Running speech & visual analysis...',
-                  fusion: 'Building your fusion report...',
-                };
-                const bars = [
-                  { key: 'speech_progress', label: 'Speech', data: statusData.speech_progress },
-                  { key: 'visual_progress', label: 'Visual', data: statusData.visual_progress },
-                ].filter((b) => b.data && typeof b.data.percent === 'number');
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <RefreshCw size={14} className="animate-spin" color="var(--primary-purple)" />
-                      <span>{stageLabels[statusData.progress_stage] || 'Processing your video...'}</span>
-                    </div>
-                    {bars.map(({ key, label, data }) => (
-                      <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', width: '52px' }}>{label}</span>
-                        <div style={{ flex: 1, height: '6px', background: 'var(--border-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div style={{
-                            width: `${Math.min(100, Math.max(2, data.percent))}%`,
-                            height: '100%',
-                            background: 'linear-gradient(90deg, var(--primary-purple), #a78bfa)',
-                            borderRadius: '3px',
-                            transition: 'width 0.6s ease',
-                          }} />
-                        </div>
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', minWidth: '110px' }}>
-                          {Math.round(data.percent)}%{data.detail ? ` — ${data.detail}` : ''}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
             </div>
 
             {/* Error Banner */}
@@ -563,7 +590,7 @@ export function StatusTracker({ sessionId, onReset }) {
 
             {/* Processed Audio & Frame Cards */}
             {isProcessedOrAnalyzed && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <div className="stagger" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   {/* Audio Card */}
                   <div style={{
@@ -743,11 +770,13 @@ export function StatusTracker({ sessionId, onReset }) {
 
                 {/* SESSION TIMELINE OVERVIEW */}
                 {speechAnalysis && visualAnalysis && (
-                  <TimelineChart
-                    speechAnalysis={speechAnalysis}
-                    visualAnalysis={visualAnalysis}
-                    fusionReport={fusionReport}
-                  />
+                  <div className="print-break-avoid">
+                    <TimelineChart
+                      speechAnalysis={speechAnalysis}
+                      visualAnalysis={visualAnalysis}
+                      fusionReport={fusionReport}
+                    />
+                  </div>
                 )}
 
                 {/* SPEECH ANALYSIS DASHBOARD RESULTS */}
@@ -760,12 +789,12 @@ export function StatusTracker({ sessionId, onReset }) {
                     flexDirection: 'column',
                     gap: '20px'
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
                       <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Sparkles size={20} color="var(--primary-purple)" />
                         <span>Speech Analysis Insights</span>
                       </h3>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                         {speechAnalysis.average_transcription_confidence !== undefined && speechAnalysis.average_transcription_confidence !== null && (
                           <span className="badge-pill" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontSize: '0.75rem', fontWeight: 600 }}>
                             STT Conf: {(speechAnalysis.average_transcription_confidence * 100).toFixed(1)}%
