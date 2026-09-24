@@ -45,6 +45,7 @@ async def list_session_history(
             has_fusion_report=has_fusion,
             smartspeak_index=fusion.get("smartspeak_index"),
             grade=fusion.get("grade"),
+            focus_goal=fusion.get("focus_goal"),
         ))
 
     return SessionHistoryResponse(sessions=summaries, total=len(summaries))

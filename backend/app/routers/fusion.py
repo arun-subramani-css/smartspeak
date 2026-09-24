@@ -8,8 +8,10 @@ from app.models.session import (
 )
 from app.services.fusion_engine import (
     generate_fusion_report_sync,
+    get_previous_focus_goal,
     process_fusion_session,
 )
+from app.services.improvement_plan import compute_improvement_plan, pick_focus_goal
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,25 @@ async def get_fusion_report(session_id: str, recompute: bool = False):
 
     fusion_data = session.get("fusion_report")
     if fusion_data and not recompute:
+        # Backfill improvement_plan for reports stored before the plan existed,
+        # preserving the original scores and grafting only the new fields.
+        if "improvement_plan" not in fusion_data and (
+            session.get("speech_analysis") is not None or session.get("visual_analysis") is not None
+        ):
+            try:
+                plan = compute_improvement_plan(session.get("speech_analysis"), session.get("visual_analysis"))
+                fusion_data = {
+                    **fusion_data,
+                    "improvement_plan": [a.model_dump(mode="json") for a in plan],
+                    "focus_goal": pick_focus_goal(plan),
+                }
+                await sessions_col.update_one(
+                    {"session_id": session_id},
+                    {"$set": {"fusion_report": fusion_data}}
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to backfill improvement plan for '{session_id}': {exc}")
+
         return FusionReportResponse(
             session_id=session["session_id"],
             status=session["status"],
@@ -44,8 +65,14 @@ async def get_fusion_report(session_id: str, recompute: bool = False):
     conf_data = session.get("confidence_analysis")
 
     if speech_data is not None or visual_data is not None:
-        # Dynamically compute, store, and return using proportional re-weighting
-        fusion_result = generate_fusion_report_sync(speech_data, visual_data, conf_data)
+        # Dynamically compute, store, and return using proportional re-weighting.
+        # Reports created before improvement_plan existed are lazily backfilled
+        # here because generate_fusion_report_sync always computes it.
+        previous_focus_goal = await get_previous_focus_goal(sessions_col, session_id)
+        fusion_result = generate_fusion_report_sync(
+            speech_data, visual_data, conf_data,
+            previous_focus_goal=previous_focus_goal,
+        )
         fusion_dict = fusion_result.model_dump(mode="json")
         next_status = SessionStatus.FUSION_COMPLETE if (speech_data is not None and visual_data is not None) else session.get("status", SessionStatus.FUSION_COMPLETE)
         await sessions_col.update_one(

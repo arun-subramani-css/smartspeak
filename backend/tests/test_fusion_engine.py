@@ -24,6 +24,46 @@ class MockMongoDBCollection:
     def __init__(self):
         self.docs = {}
 
+    class _Cursor:
+        def __init__(self, docs):
+            self._docs = list(docs)
+
+        def sort(self, key, direction=1):
+            self._docs.sort(key=lambda d: str(d.get(key) or ""), reverse=(direction == -1))
+            return self
+
+        def limit(self, n):
+            self._docs = self._docs[:n]
+            return self
+
+        async def to_list(self, n=None):
+            docs = [d.copy() for d in self._docs]
+            return docs[:n] if n else docs
+
+    @staticmethod
+    def _dotted(doc, key):
+        cur = doc
+        for part in key.split("."):
+            if not isinstance(cur, dict) or part not in cur:
+                return None
+            cur = cur[part]
+        return cur
+
+    def find(self, query=None):
+        q = query or {}
+
+        def matches(doc):
+            for k, v in q.items():
+                actual = self._dotted(doc, k)
+                if isinstance(v, dict) and "$ne" in v:
+                    if actual == v["$ne"]:
+                        return False
+                elif actual != v:
+                    return False
+            return True
+
+        return self._Cursor([d for d in self.docs.values() if matches(d)])
+
     async def insert_one(self, doc):
         self.docs[doc["session_id"]] = doc.copy()
         return MagicMock(inserted_id=doc["session_id"])
@@ -456,3 +496,176 @@ def test_trigger_fusion_analysis_endpoint(client, mock_mongodb):
     data = response.json()
     assert data["session_id"] == session_id
     assert data["status"] == "processing"
+
+
+# ---------------------------------------------------------------------------
+# Improvement Plan & Focus Goal
+# ---------------------------------------------------------------------------
+
+from app.services.improvement_plan import compute_improvement_plan, pick_focus_goal
+
+
+def test_improvement_plan_ranks_and_uses_real_numbers():
+    speech = {
+        "wpm_data": {"total_words": 300, "overall_wpm": 195.0, "total_speaking_duration_seconds": 92.0},
+        "filler_word_count": 6,
+        "filler_words": [{"word": "um", "timestamp": 2.0}, {"word": "um", "timestamp": 9.0}],
+        "long_pauses": [{"start_time": 20.0, "end_time": 28.0, "duration": 8.0}],
+        "repetitions": [],
+    }
+    visual = {
+        "eye_contact": {"eye_contact_percentage": 35.0, "looking_away_ranges": [
+            {"start_time": 2.0, "end_time": 6.0, "duration": 4.0, "category": "looking_down"},
+        ]},
+        "posture": {"total_frames_analyzed": 90, "posture_score": 80.0},
+        "gesture": {"gesture_usage_classification": "average"},
+        "head_movement": {"head_movement_score": 95.0, "excessive_movement_count": 1},
+    }
+
+    plan = compute_improvement_plan(speech, visual)
+    assert 1 <= len(plan) <= 3
+    # Ranked by severity, descending
+    severities = [a.severity for a in plan]
+    assert severities == sorted(severities, reverse=True)
+
+    # The 8s pause is the biggest impact -> focus goal
+    assert plan[0].metric == "pauses"
+    assert pick_focus_goal(plan) == "pauses"
+    # Drill cites the actual measured duration
+    assert "8.0s" in plan[0].drill
+
+    # The pace drill cites the actual 195 WPM
+    wpm_actions = [a for a in plan if a.metric == "wpm"]
+    assert wpm_actions and "195" in wpm_actions[0].drill
+
+
+def test_improvement_plan_empty_for_clean_session():
+    speech = {
+        "wpm_data": {"total_words": 100, "overall_wpm": 145.0, "total_speaking_duration_seconds": 40.0},
+        "filler_word_count": 0, "filler_words": [], "long_pauses": [], "repetitions": [],
+    }
+    visual = {
+        "eye_contact": {"eye_contact_percentage": 95.0, "looking_away_ranges": []},
+        "posture": {"total_frames_analyzed": 20, "posture_score": 95.0},
+        "gesture": {"gesture_usage_classification": "average"},
+        "head_movement": {"head_movement_score": 90.0, "excessive_movement_count": 0},
+    }
+    plan = compute_improvement_plan(speech, visual)
+    assert plan == []
+    assert pick_focus_goal(plan) is None
+
+
+def test_improvement_plan_eye_and_posture_numbers():
+    visual = {
+        "eye_contact": {"eye_contact_percentage": 20.0, "looking_away_ranges": [
+            {"start_time": 0.0, "end_time": 5.0, "duration": 5.0, "category": "looking_away"},
+        ]},
+        "posture": {"total_frames_analyzed": 100, "posture_score": 50.0},
+        "gesture": {"gesture_usage_classification": "too_few", "active_hand_percentage": 4.0},
+        "head_movement": {"head_movement_score": 90.0},
+    }
+    plan = compute_improvement_plan(None, visual)
+    by_metric = {a.metric: a for a in plan}
+    # Eye contact 20% vs 60% target = 40-point severity; posture 50 vs 90 = 40
+    assert by_metric["eye_contact"].severity == 40.0
+    assert by_metric["posture"].severity == 40.0
+    # Posture drill counts bad frames from the real ratio: 50 of 100
+    assert "50 of 100" in by_metric["posture"].drill
+    # Gesture drill cites the real active-hand percentage
+    assert "4%" in by_metric["gestures"].drill
+
+
+def test_fusion_report_includes_plan_and_focus_goal():
+    speech = {
+        "wpm_data": {"total_words": 100, "overall_wpm": 200.0, "total_speaking_duration_seconds": 30.0},
+        "filler_word_count": 0, "filler_words": [], "long_pauses": [],
+        "repetitions": [{"phrase": "kind of", "count": 3, "timestamp": 5.0}],
+    }
+    visual = {
+        "eye_contact": {"eye_contact_percentage": 30.0, "looking_away_ranges": []},
+        "posture": {"total_frames_analyzed": 20, "posture_score": 95.0},
+        "gesture": {"gesture_usage_classification": "average"},
+        "head_movement": {"head_movement_score": 90.0},
+    }
+    result = generate_fusion_report_sync(speech, visual, None, previous_focus_goal="eye_contact")
+    assert result.improvement_plan, "plan should be non-empty for weak metrics"
+    assert result.focus_goal in {a.metric for a in result.improvement_plan}
+    assert result.previous_focus_goal == "eye_contact"
+
+
+def test_fusion_persists_focus_goal_and_prior_lookup(client, mock_mongodb):
+    # Prior completed session with a focus goal
+    mock_mongodb.docs["prior-session"] = {
+        "session_id": "prior-session",
+        "status": SessionStatus.FUSION_COMPLETE,
+        "upload_timestamp": "2026-09-23T10:00:00Z",
+        "speech_analysis": {"wpm_data": {"total_words": 100, "overall_wpm": 200.0,
+                                        "total_speaking_duration_seconds": 30.0},
+                            "filler_word_count": 0, "filler_words": [], "long_pauses": [], "repetitions": []},
+        "visual_analysis": {"eye_contact": {"eye_contact_percentage": 30.0, "looking_away_ranges": []},
+                            "posture": {"total_frames_analyzed": 20, "posture_score": 95.0},
+                            "gesture": {"gesture_usage_classification": "average"},
+                            "head_movement": {"head_movement_score": 90.0}},
+        "fusion_report": {
+            "smartspeak_index": 60.0, "grade": "Competent",
+            "verbal_score": 50.0, "non_verbal_score": 55.0, "ml_confidence_score": 70.0,
+            "mistakes": [], "speech_gesture_correlation": [],
+            "improvement_plan": [], "focus_goal": "wpm",
+            "analyzed_at": "2026-09-23T10:05:00Z",
+        },
+    }
+
+    session_id = "current-session"
+    mock_mongodb.docs[session_id] = {
+        "session_id": session_id,
+        "status": SessionStatus.READY_FOR_FUSION,
+        "upload_timestamp": "2026-09-24T10:00:00Z",
+        "speech_analysis": {"wpm_data": {"total_words": 100, "overall_wpm": 150.0,
+                                        "total_speaking_duration_seconds": 40.0},
+                            "filler_word_count": 1, "filler_words": [{"word": "um", "timestamp": 3.0}],
+                            "long_pauses": [], "repetitions": []},
+        "visual_analysis": {"eye_contact": {"eye_contact_percentage": 90.0, "looking_away_ranges": []},
+                            "posture": {"total_frames_analyzed": 30, "posture_score": 92.0},
+                            "gesture": {"gesture_usage_classification": "average"},
+                            "head_movement": {"head_movement_score": 88.0}},
+        "confidence_analysis": {"confidence_score": 80.0},
+    }
+
+    response = client.get(f"/api/v1/sessions/{session_id}/fusion-report")
+    assert response.status_code == 200
+    report = response.json()["fusion_report"]
+    assert report["previous_focus_goal"] == "wpm"
+    assert report["focus_goal"] is None or isinstance(report["focus_goal"], str)
+    assert isinstance(report["improvement_plan"], list)
+
+
+
+def test_fusion_backfills_legacy_report_via_endpoint(client, mock_mongodb):
+    """Historical session stored before improvement_plan existed: the endpoint
+    backfills the plan, sets focus_goal, and persists the changes."""
+    old_doc = {
+        "session_id": "legacy-session",
+        "status": SessionStatus.FUSION_COMPLETE,
+        "upload_timestamp": "2026-09-22T10:00:00Z",
+        "speech_analysis": {"wpm_data": {"total_words": 80, "overall_wpm": 190.0,
+                                        "total_speaking_duration_seconds": 25.0},
+                            "filler_word_count": 0, "filler_words": [], "long_pauses": [], "repetitions": []},
+        "visual_analysis": {"eye_contact": {"eye_contact_percentage": 20.0, "looking_away_ranges": []},
+                            "posture": {"total_frames_analyzed": 20, "posture_score": 90.0},
+                            "gesture": {"gesture_usage_classification": "average"},
+                            "head_movement": {"head_movement_score": 90.0}},
+        "fusion_report": {
+            "smartspeak_index": 55.0, "grade": "Competent",
+            "verbal_score": 50.0, "non_verbal_score": 60.0, "ml_confidence_score": 55.0,
+            "mistakes": [], "speech_gesture_correlation": [],
+            "analyzed_at": "2026-09-22T10:05:00Z",
+        },
+    }
+    mock_mongodb.docs["legacy-session"] = old_doc
+
+    response = client.get("/api/v1/sessions/legacy-session/fusion-report")
+    assert response.status_code == 200
+    legacy_report = response.json()["fusion_report"]
+    assert len(legacy_report["improvement_plan"]) >= 1
+    assert legacy_report["focus_goal"] is not None
+    assert "improvement_plan" in mock_mongodb.docs["legacy-session"]["fusion_report"]

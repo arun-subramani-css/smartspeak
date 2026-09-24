@@ -132,9 +132,19 @@ class LocalAsyncCollection:
             self._save_to_disk()
         return type("InsertResult", (), {"inserted_id": session_id})()
 
+    @staticmethod
+    def _resolve_dotted(doc: Dict[str, Any], key: str) -> Any:
+        """Resolves Mongo-style dotted paths (e.g. 'fusion_report.focus_goal')."""
+        cur: Any = doc
+        for part in key.split("."):
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(part)
+        return cur
+
     def _matches_query(self, doc: Dict[str, Any], query: Dict[str, Any]) -> bool:
         for k, v in query.items():
-            doc_val = doc.get(k)
+            doc_val = self._resolve_dotted(doc, k) if "." in k else doc.get(k)
             if isinstance(v, dict):
                 if "$ne" in v and doc_val == v["$ne"]:
                     return False

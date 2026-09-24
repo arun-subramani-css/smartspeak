@@ -6,6 +6,7 @@ import {
 import { TimelineChart } from './TimelineChart';
 import { ReportVideoProvider, ReportVideoPlayer, useReportVideo } from './ReportVideoPlayer';
 import { InteractiveTranscript } from './InteractiveTranscript';
+import { ImprovementPlan } from './ImprovementPlan';
 
 function scoreColor(v) {
   if (v >= 70) return '#10b981';
@@ -424,6 +425,9 @@ export function StatusTracker({ sessionId, onReset }) {
                 </button>
               </div>
             )}
+
+            {/* Improvement Plan — prescriptive actions, above the score */}
+            <ImprovementPlan fusionReport={fusionReport} />
 
             {/* Overall Performance & SmartSpeak Index Hero Card */}
             {fusionReport && (

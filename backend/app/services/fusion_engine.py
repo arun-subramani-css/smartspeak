@@ -8,6 +8,7 @@ from app.models.session import (
     MistakeItem,
     SessionStatus,
 )
+from app.services.improvement_plan import compute_improvement_plan, pick_focus_goal, METRIC_LABELS
 
 logger = logging.getLogger("smartspeak.fusion_engine")
 
@@ -579,15 +580,48 @@ def correlate_speech_and_gestures(
     return insights
 
 
+def pick_focus_goal(actions) -> Optional[str]:
+    """The single worst metric (highest-impact action) becomes the focus goal."""
+    return actions[0].metric if actions else None
+
+
+async def get_previous_focus_goal(sessions_col, exclude_session_id: str) -> Optional[str]:
+    """
+    Focus goal of the most recent other completed session, so a new report can
+    show progress against the prior session's goal. Tolerates stores whose
+    find().sort().limit() chain is unavailable.
+    """
+    try:
+        prior_cursor = (
+            sessions_col.find({
+                "session_id": {"$ne": exclude_session_id},
+                "status": SessionStatus.FUSION_COMPLETE,
+                "fusion_report.focus_goal": {"$ne": None},
+            })
+            .sort("upload_timestamp", -1)
+            .limit(1)
+        )
+        prior_docs = await prior_cursor.to_list(1)
+        if prior_docs:
+            return (prior_docs[0].get("fusion_report") or {}).get("focus_goal")
+    except Exception as exc:
+        logger.warning(f"Previous focus-goal lookup failed: {exc}")
+    return None
+
+
 def generate_fusion_report_sync(
     speech_analysis: Optional[Dict[str, Any]],
     visual_analysis: Optional[Dict[str, Any]],
-    confidence_analysis: Optional[Dict[str, Any]]
+    confidence_analysis: Optional[Dict[str, Any]],
+    previous_focus_goal: Optional[str] = None,
 ) -> FusionReportResult:
     """Synchronously creates the complete FusionReportResult."""
     mistakes = detect_mistakes(speech_analysis, visual_analysis)
     scores = compute_composite_scores(speech_analysis, visual_analysis, confidence_analysis)
     speech_gesture_correlation = correlate_speech_and_gestures(speech_analysis, visual_analysis)
+
+    improvement_plan = compute_improvement_plan(speech_analysis, visual_analysis)
+    focus_goal = pick_focus_goal(improvement_plan)
 
     return FusionReportResult(
         mistakes=mistakes,
@@ -597,6 +631,9 @@ def generate_fusion_report_sync(
         non_verbal_score=scores["non_verbal_score"],
         ml_confidence_score=scores["ml_confidence_score"],
         speech_gesture_correlation=speech_gesture_correlation,
+        improvement_plan=improvement_plan,
+        focus_goal=focus_goal,
+        previous_focus_goal=previous_focus_goal,
         analyzed_at=datetime.now(timezone.utc)
     )
 
@@ -619,8 +656,13 @@ async def process_fusion_session(session_id: str) -> bool:
     confidence_analysis = session_doc.get("confidence_analysis")
 
     try:
+        # Look up the previous completed session's focus goal so the report can
+        # show progress against it.
+        previous_focus_goal = await get_previous_focus_goal(sessions_col, session_id)
+
         fusion_result = generate_fusion_report_sync(
-            speech_analysis, visual_analysis, confidence_analysis
+            speech_analysis, visual_analysis, confidence_analysis,
+            previous_focus_goal=previous_focus_goal,
         )
         fusion_dict = fusion_result.model_dump(mode="json")
 

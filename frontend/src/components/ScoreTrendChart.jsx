@@ -14,6 +14,11 @@ const METRICS = [
   { key: 'posture_score', label: 'Posture', color: '#10b981' },
 ];
 
+const GOAL_LABELS = {
+  wpm: 'Pace', fillers: 'Fillers', pauses: 'Pauses', repetitions: 'Repeats',
+  eye_contact: 'Eye contact', posture: 'Posture', gestures: 'Gestures', head_movement: 'Head',
+};
+
 /**
  * ScoreTrendChart — progress-over-time line chart of the most recent
  * completed sessions. Pure SVG, no chart library. Renders only when
@@ -141,11 +146,25 @@ export function ScoreTrendChart() {
                 {series.dates.length > 8 && i % 2 === 1 ? '' : d}
               </text>
             ))}
+
+            {/* Focus-goal markers: what each session set out to work on */}
+            {sessions.map((s, i) => {
+              const goal = s.focus_goal;
+              if (!goal || hidden.has('smartspeak_index')) return null;
+              const y = series.y(s.smartspeak_index ?? 0);
+              return (
+                <g key={`goal-${i}`}>
+                  <circle cx={series.x(i)} cy={y} r="8.5" fill="none" stroke="#d97706" strokeWidth="1.6" strokeDasharray="2.5 2.5">
+                    <title>{`Focus goal: ${GOAL_LABELS[goal] || goal} — ${series.filenames[i] || ''} (${series.dates[i]})`}</title>
+                  </circle>
+                </g>
+              );
+            })}
           </svg>
         )}
 
         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
-          <LineChart size={12} style={{ verticalAlign: '-2px' }} /> Hover any point for session details. Click a legend chip to focus on one metric.
+          <LineChart size={12} style={{ verticalAlign: '-2px' }} /> Hover any point for session details. Click a legend chip to focus on one metric. Dashed rings mark each session's focus goal.
         </p>
       </div>
     </div>

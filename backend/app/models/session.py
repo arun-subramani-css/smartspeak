@@ -157,6 +157,7 @@ class SessionSummary(BaseModel):
     has_fusion_report: bool = False
     smartspeak_index: float | None = None
     grade: str | None = None
+    focus_goal: str | None = None
 
 
 class SessionHistoryResponse(BaseModel):
@@ -172,6 +173,16 @@ class MistakeItem(BaseModel):
     events: list[str] | None = None
 
 
+class ImprovementAction(BaseModel):
+    """One prioritized coaching action derived from the session's real numbers."""
+    metric: str          # "wpm", "fillers", "pauses", "repetitions", "eye_contact", "posture", "gestures", "head_movement"
+    title: str           # short drill name
+    drill: str           # concrete, numbers-driven instruction
+    severity: float      # impact 0-100 (higher = further from target)
+    current_value: float # this session's measured value
+    target_value: float  # the value that removes the penalty
+
+
 class FusionReportResult(BaseModel):
     mistakes: list[MistakeItem] = []
     smartspeak_index: float
@@ -180,6 +191,9 @@ class FusionReportResult(BaseModel):
     non_verbal_score: float
     ml_confidence_score: float
     speech_gesture_correlation: list[MistakeItem] = []
+    improvement_plan: list[ImprovementAction] = []
+    focus_goal: str | None = None          # metric key of the single worst metric
+    previous_focus_goal: str | None = None # focus goal of the prior completed session
     analyzed_at: datetime
 
 
