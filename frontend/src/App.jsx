@@ -1,13 +1,26 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Header } from './components/Header';
 import { VideoUploader } from './components/VideoUploader';
 import { StatusTracker } from './components/StatusTracker';
 import { RecentReports } from './components/RecentReports';
 import { ScoreTrendChart } from './components/ScoreTrendChart';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Sparkles, Check } from 'lucide-react';
 
 export default function App() {
-  const [currentSessionId, setCurrentSessionId] = useState(null);
+  // Persist the active session across refreshes so an in-progress upload
+  // isn't lost when the tab reloads. 'done' is cleared on reset.
+  const [currentSessionId, setCurrentSessionId] = useState(
+    () => localStorage.getItem('smartspeak.activeSession') || null
+  );
+
+  useEffect(() => {
+    if (currentSessionId) {
+      localStorage.setItem('smartspeak.activeSession', currentSessionId);
+    } else {
+      localStorage.removeItem('smartspeak.activeSession');
+    }
+  }, [currentSessionId]);
 
   const handleUploadSuccess = (sessionId) => {
     setCurrentSessionId(sessionId);
@@ -23,6 +36,7 @@ export default function App() {
       <Header />
 
       <main id="main-content" className="max-w-container" style={{ flex: 1, padding: '48px 24px 64px', width: '100%' }}>
+        <ErrorBoundary>
         {!currentSessionId ? (
           <>
             {/* Hero Section */}
@@ -108,6 +122,7 @@ export default function App() {
         ) : (
           <StatusTracker sessionId={currentSessionId} onReset={handleReset} />
         )}
+        </ErrorBoundary>
       </main>
 
       {/* Footer */}
