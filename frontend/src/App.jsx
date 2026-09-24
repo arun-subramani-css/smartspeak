@@ -4,6 +4,7 @@ import { VideoUploader } from './components/VideoUploader';
 import { StatusTracker } from './components/StatusTracker';
 import { RecentReports } from './components/RecentReports';
 import { ScoreTrendChart } from './components/ScoreTrendChart';
+import { SessionCompare } from './components/SessionCompare';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Sparkles, Check } from 'lucide-react';
 
@@ -13,6 +14,8 @@ export default function App() {
   const [currentSessionId, setCurrentSessionId] = useState(
     () => localStorage.getItem('smartspeak.activeSession') || null
   );
+  // Side-by-side comparison pair {olderId, newerId}, set from Recent Reports.
+  const [comparePair, setComparePair] = useState(null);
 
   useEffect(() => {
     if (currentSessionId) {
@@ -28,6 +31,25 @@ export default function App() {
 
   const handleReset = () => {
     setCurrentSessionId(null);
+  };
+
+  // From a report: compare it against the previous completed session.
+  // Loads the history list on demand to find the prior session id, then
+  // switches to the landing view where the comparison renders.
+  const handleCompareWithPrevious = async () => {
+    try {
+      const res = await fetch('/api/v1/sessions/history?limit=25&completed_only=true');
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = data.sessions || [];
+      const idx = list.findIndex((s) => s.session_id === currentSessionId);
+      if (idx >= 0 && idx + 1 < list.length) {
+        setComparePair({ olderId: list[idx + 1].session_id, newerId: currentSessionId });
+        setCurrentSessionId(null); // exit the report so the compare view shows
+      }
+    } catch {
+      /* history unavailable — silently skip */
+    }
   };
 
   return (
@@ -115,12 +137,27 @@ export default function App() {
             </div>
 
             {/* Ingestion Card / Status Tracker */}
+            {comparePair && (
+              <SessionCompare
+                olderId={comparePair.olderId}
+                newerId={comparePair.newerId}
+                onOpenSession={setCurrentSessionId}
+                onClose={() => setComparePair(null)}
+              />
+            )}
             <VideoUploader onUploadSuccess={handleUploadSuccess} />
-            <RecentReports onOpenSession={setCurrentSessionId} />
+            <RecentReports
+              onOpenSession={setCurrentSessionId}
+              onCompareSession={(id, prevId) => setComparePair({ olderId: prevId, newerId: id })}
+            />
             <ScoreTrendChart />
           </>
         ) : (
-          <StatusTracker sessionId={currentSessionId} onReset={handleReset} />
+          <StatusTracker
+            sessionId={currentSessionId}
+            onReset={handleReset}
+            onCompareWithPrevious={handleCompareWithPrevious}
+          />
         )}
         </ErrorBoundary>
       </main>

@@ -165,6 +165,58 @@ class SessionHistoryResponse(BaseModel):
     total: int = 0
 
 
+# --- Session comparison ---
+
+class SessionMetricSnapshot(BaseModel):
+    """Normalized metric values for one session, used for side-by-side comparison."""
+    session_id: str
+    original_filename: str
+    upload_timestamp: datetime | None = None
+    smartspeak_index: float | None = None
+    grade: str | None = None
+    eye_contact: float | None = None
+    posture: float | None = None
+    gesture_active: float | None = None
+    head_movement: float | None = None
+    wpm: float | None = None
+    filler_count: int | None = None
+    filler_ratio: float | None = None  # fillers per 100 words
+    repetition_count: int | None = None
+    long_pause_count: int | None = None
+    longest_pause: float | None = None
+    duration_seconds: float | None = None
+    focus_goal: str | None = None
+
+
+class SessionMetricDelta(BaseModel):
+    metric: str
+    label: str
+    unit: str = ""
+    older: float | None = None
+    newer: float | None = None
+    delta: float | None = None
+    direction: str  # "improved" | "regressed" | "same" | "neutral"
+    verdict: str    # short human summary of the change
+
+
+class FocusGoalProgress(BaseModel):
+    goal_metric: str
+    goal_label: str
+    older_value: float | None = None
+    newer_value: float | None = None
+    improved: bool
+    summary: str
+
+
+class SessionCompareResponse(BaseModel):
+    older: SessionMetricSnapshot
+    newer: SessionMetricSnapshot
+    score_delta: float
+    score_direction: str  # "improved" | "regressed" | "same"
+    deltas: list[SessionMetricDelta]
+    focus_goal_progress: FocusGoalProgress | None = None
+
+
 class MistakeItem(BaseModel):
     timestamp: float
     category: str  # "speech", "visual", "compound"

@@ -2,7 +2,17 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, status
 from app.db.mongodb import MongoDB
-from app.models.session import StatusResponse, SessionHistoryResponse, SessionSummary
+from app.models.session import (
+    StatusResponse,
+    SessionHistoryResponse,
+    SessionSummary,
+    SessionCompareResponse,
+)
+from app.services.compare_service import (
+    build_metric_snapshot,
+    build_metric_delta,
+    build_focus_goal_progress,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +59,77 @@ async def list_session_history(
         ))
 
     return SessionHistoryResponse(sessions=summaries, total=len(summaries))
+
+
+@router.get("/compare", response_model=SessionCompareResponse)
+async def compare_sessions(
+    older: str,
+    newer: str,
+):
+    """
+    Side-by-side comparison of two completed sessions with per-metric deltas.
+
+    - older: session_id of the earlier session
+    - newer: session_id of the later session
+    Both sessions must exist and have a fusion report.
+    """
+    if older == newer:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pick two different sessions to compare."
+        )
+
+    sessions_col = MongoDB.get_collection("sessions")
+
+    doc_older = await sessions_col.find_one({"session_id": older})
+    doc_newer = await sessions_col.find_one({"session_id": newer})
+
+    if not doc_older:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Session '{older}' was not found.")
+    if not doc_newer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Session '{newer}' was not found.")
+
+    if doc_older.get("fusion_report") is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Session '{older}' has no completed analysis yet.")
+    if doc_newer.get("fusion_report") is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Session '{newer}' has no completed analysis yet.")
+
+    snap_older = build_metric_snapshot(doc_older)
+    snap_newer = build_metric_snapshot(doc_newer)
+
+    # Order the pair chronologically by upload time when the caller mixed them up.
+    ts_old = doc_older.get("upload_timestamp") or ""
+    ts_new = doc_newer.get("upload_timestamp")
+    if ts_new and str(ts_new) < str(ts_old):
+        snap_older, snap_newer = snap_newer, snap_older
+
+    deltas = []
+    for metric in ("smartspeak_index", "eye_contact", "posture", "head_movement",
+                   "wpm", "filler_ratio", "repetition_count", "long_pause_count", "longest_pause"):
+        d = build_metric_delta(
+            metric,
+            getattr(snap_older, metric, None),
+            getattr(snap_newer, metric, None)
+        )
+        if d:
+            deltas.append(d)
+
+    return SessionCompareResponse(
+        older=snap_older,
+        newer=snap_newer,
+        score_delta=round((snap_newer.smartspeak_index or 0) - (snap_older.smartspeak_index or 0), 1),
+        score_direction=(
+            "same" if abs((snap_newer.smartspeak_index or 0) - (snap_older.smartspeak_index or 0)) < 0.05
+            else "improved" if (snap_newer.smartspeak_index or 0) > (snap_older.smartspeak_index or 0)
+            else "regressed"
+        ),
+        deltas=deltas,
+        focus_goal_progress=build_focus_goal_progress(snap_older, snap_newer),
+    )
 
 
 @router.get("/{session_id}/status", response_model=StatusResponse)

@@ -7,6 +7,7 @@ import { TimelineChart } from './TimelineChart';
 import { ReportVideoProvider, ReportVideoPlayer, useReportVideo } from './ReportVideoPlayer';
 import { InteractiveTranscript } from './InteractiveTranscript';
 import { ImprovementPlan } from './ImprovementPlan';
+import { GitCompare } from 'lucide-react';
 
 function scoreColor(v) {
   if (v >= 70) return '#10b981';
@@ -56,7 +57,7 @@ function TimelineWithSeek(props) {
   return <TimelineChart {...props} onSeek={seekTo} />;
 }
 
-export function StatusTracker({ sessionId, onReset }) {
+export function StatusTracker({ sessionId, onReset, onCompareWithPrevious }) {
   const [statusData, setStatusData] = useState(null);
   const [speechAnalysis, setSpeechAnalysis] = useState(null);
   const [visualAnalysis, setVisualAnalysis] = useState(null);
@@ -250,6 +251,12 @@ export function StatusTracker({ sessionId, onReset }) {
         </div>
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {fusionReport && onCompareWithPrevious && (
+            <button onClick={onCompareWithPrevious} className="btn-light no-print" style={{ padding: '8px 16px', fontSize: '0.875rem' }}>
+              <GitCompare size={15} />
+              <span>Compare with previous</span>
+            </button>
+          )}
           {fusionReport && (
             <button onClick={() => window.print()} className="btn-purple no-print" style={{ padding: '8px 16px', fontSize: '0.875rem' }}>
               <Download size={16} />

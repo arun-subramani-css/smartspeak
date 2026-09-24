@@ -669,3 +669,143 @@ def test_fusion_backfills_legacy_report_via_endpoint(client, mock_mongodb):
     assert len(legacy_report["improvement_plan"]) >= 1
     assert legacy_report["focus_goal"] is not None
     assert "improvement_plan" in mock_mongodb.docs["legacy-session"]["fusion_report"]
+
+
+# ---------------------------------------------------------------------------
+# Session Comparison Endpoint
+# ---------------------------------------------------------------------------
+
+from app.services.compare_service import build_metric_snapshot, build_metric_delta
+
+COMPARE_SPEECH_OLD = {
+    "wpm_data": {"total_words": 200, "overall_wpm": 185.0, "total_speaking_duration_seconds": 65.0},
+    "filler_word_count": 18, "filler_words": [], "repetitions": [{"phrase": "x", "count": 2}],
+    "long_pauses": [{"duration": 5.5}],
+}
+COMPARE_VISUAL_OLD = {
+    "eye_contact": {"eye_contact_percentage": 30.0, "looking_away_ranges": []},
+    "posture": {"total_frames_analyzed": 60, "posture_score": 70.0},
+    "gesture": {"active_hand_percentage": 8.0, "gesture_usage_classification": "too_few"},
+    "head_movement": {"head_movement_score": 60.0, "excessive_movement_count": 3},
+}
+COMPARE_SPEECH_NEW = {
+    "wpm_data": {"total_words": 200, "overall_wpm": 150.0, "total_speaking_duration_seconds": 80.0},
+    "filler_word_count": 6, "filler_words": [], "repetitions": [],
+    "long_pauses": [{"duration": 3.2}],
+}
+COMPARE_VISUAL_NEW = {
+    "eye_contact": {"eye_contact_percentage": 55.0, "looking_away_ranges": []},
+    "posture": {"total_frames_analyzed": 75, "posture_score": 92.0},
+    "gesture": {"active_hand_percentage": 30.0, "gesture_usage_classification": "average"},
+    "head_movement": {"head_movement_score": 85.0, "excessive_movement_count": 1},
+}
+
+
+def _seed_compare_sessions(mock):
+    mock.docs["cmp-old"] = {
+        "session_id": "cmp-old", "original_filename": "old.mp4",
+        "upload_timestamp": "2026-09-22T10:00:00Z", "status": SessionStatus.FUSION_COMPLETE,
+        "speech_analysis": COMPARE_SPEECH_OLD, "visual_analysis": COMPARE_VISUAL_OLD,
+        "fusion_report": {
+            "smartspeak_index": 55.0, "grade": "Competent",
+            "verbal_score": 50.0, "non_verbal_score": 55.0, "ml_confidence_score": 60.0,
+            "mistakes": [], "speech_gesture_correlation": [],
+            "improvement_plan": [], "focus_goal": "fillers",
+            "analyzed_at": "2026-09-22T10:05:00Z",
+        },
+    }
+    mock.docs["cmp-new"] = {
+        "session_id": "cmp-new", "original_filename": "new.webm",
+        "upload_timestamp": "2026-09-24T10:00:00Z", "status": SessionStatus.FUSION_COMPLETE,
+        "speech_analysis": COMPARE_SPEECH_NEW, "visual_analysis": COMPARE_VISUAL_NEW,
+        "fusion_report": {
+            "smartspeak_index": 68.0, "grade": "Competent",
+            "verbal_score": 65.0, "non_verbal_score": 75.0, "ml_confidence_score": 64.0,
+            "mistakes": [], "speech_gesture_correlation": [],
+            "improvement_plan": [], "focus_goal": "gestures",
+            "analyzed_at": "2026-09-24T10:05:00Z",
+        },
+    }
+
+
+def test_compare_endpoint_happy_path(client, mock_mongodb):
+    _seed_compare_sessions(mock_mongodb)
+    response = client.get("/api/v1/sessions/compare?older=cmp-old&newer=cmp-new")
+    assert response.status_code == 200
+    data = response.json()
+
+    # Score delta front and center
+    assert data["score_delta"] == 13.0
+    assert data["score_direction"] == "improved"
+
+    # Snapshots carry filenames and focus goals
+    assert data["older"]["original_filename"] == "old.mp4"
+    assert data["newer"]["focus_goal"] == "gestures"
+
+    # Metric rows: fillers 18 -> 6 improved; eye contact 30 -> 55 improved;
+    # WPM 185 -> 150 improved (band metric); posture 70 -> 92 improved.
+    by_metric = {d["metric"]: d for d in data["deltas"]}
+    assert by_metric["filler_ratio"]["older"] == 9.0 and by_metric["filler_ratio"]["newer"] == 3.0
+    assert by_metric["filler_ratio"]["direction"] == "improved"
+    assert by_metric["eye_contact"]["direction"] == "improved"
+    assert by_metric["wpm"]["direction"] == "improved"
+    assert "ideal" in by_metric["wpm"]["verdict"]
+    assert by_metric["posture"]["direction"] == "improved"
+    assert by_metric["repetition_count"]["direction"] == "improved"
+    assert by_metric["longest_pause"]["direction"] == "improved"
+
+    # Focus-goal progress: older session's goal was "fillers" (18 -> 6)
+    prog = data["focus_goal_progress"]
+    assert prog is not None
+    assert prog["goal_metric"] == "fillers"
+    assert prog["improved"] is True
+    assert "18" in prog["summary"] and "6" in prog["summary"]
+
+
+def test_compare_endpoint_chronological_swap(client, mock_mongodb):
+    _seed_compare_sessions(mock_mongodb)
+    # Callers may pass the pair in either order; result must be identical.
+    r1 = client.get("/api/v1/sessions/compare?older=cmp-old&newer=cmp-new").json()
+    r2 = client.get("/api/v1/sessions/compare?older=cmp-new&newer=cmp-old").json()
+    assert r1["older"]["session_id"] == r2["older"]["session_id"] == "cmp-old"
+    assert r1["score_delta"] == r2["score_delta"]
+
+
+def test_compare_endpoint_same_session_400(client, mock_mongodb):
+    _seed_compare_sessions(mock_mongodb)
+    response = client.get("/api/v1/sessions/compare?older=cmp-old&newer=cmp-old")
+    assert response.status_code == 400
+
+
+def test_compare_endpoint_missing_session_404(client, mock_mongodb):
+    _seed_compare_sessions(mock_mongodb)
+    response = client.get("/api/v1/sessions/compare?older=cmp-old&newer=does-not-exist")
+    assert response.status_code == 404
+
+
+def test_compare_endpoint_uncompleted_session_400(client, mock_mongodb):
+    _seed_compare_sessions(mock_mongodb)
+    mock_mongodb.docs["cmp-partial"] = {
+        "session_id": "cmp-partial", "original_filename": "partial.mp4",
+        "upload_timestamp": "2026-09-23T10:00:00Z", "status": SessionStatus.PROCESSING,
+    }
+    response = client.get("/api/v1/sessions/compare?older=cmp-old&newer=cmp-partial")
+    assert response.status_code == 400
+    assert "completed analysis" in response.json()["detail"]
+
+
+def test_compare_delta_direction_semantics():
+    # Lower-is-better metric
+    d = build_metric_delta("filler_ratio", 9.0, 3.0)
+    assert d.direction == "improved" and d.delta == -6.0
+    d = build_metric_delta("filler_ratio", 3.0, 9.0)
+    assert d.direction == "regressed"
+    # Higher-is-better metric
+    d = build_metric_delta("eye_contact", 30.0, 55.0)
+    assert d.direction == "improved"
+    # Band metric
+    d = build_metric_delta("wpm", 100.0, 140.0)
+    assert d.direction == "improved" and "ideal" in d.verdict
+    # Missing data on either side -> no row
+    assert build_metric_delta("posture", None, 90.0) is None
+    assert build_metric_delta("posture", 90.0, None) is None

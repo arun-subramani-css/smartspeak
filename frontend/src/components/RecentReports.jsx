@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { History, ChevronRight, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { History, ChevronRight, TrendingUp, TrendingDown, Minus, GitCompare } from 'lucide-react';
 
 const GRADE_COLORS = {
   Executive: '#10b981',
@@ -50,7 +50,7 @@ function TrendDelta({ current, previous }) {
  * Click any row to reopen its full report. Hidden entirely when the
  * backend has no completed sessions or cannot be reached.
  */
-export function RecentReports({ onOpenSession }) {
+export function RecentReports({ onOpenSession, onCompareSession }) {
   const [sessions, setSessions] = useState(null);
   const [failed, setFailed] = useState(false);
 
@@ -89,8 +89,13 @@ export function RecentReports({ onOpenSession }) {
       <div className="pro-card-body" style={{ paddingTop: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {sessions.map((s, i) => (
-          <button
+          <div
             key={s.session_id}
+            style={{
+              display: 'flex', alignItems: 'stretch', gap: 6, width: '100%',
+            }}
+          >
+          <button
             type="button"
             onClick={() => onOpenSession(s.session_id)}
             style={{
@@ -142,6 +147,26 @@ export function RecentReports({ onOpenSession }) {
 
             <ChevronRight size={16} color="#94a3b8" style={{ flexShrink: 0 }} />
           </button>
+
+          {onCompareSession && sessions[i + 1] && (
+            <button
+              type="button"
+              onClick={() => onCompareSession(s.session_id, sessions[i + 1].session_id)}
+              title={`Compare with previous session (${sessions[i + 1].original_filename})`}
+              aria-label={`Compare this session with ${sessions[i + 1].original_filename}`}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: '#ffffff', border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)', cursor: 'pointer', padding: '0 10px',
+                color: 'var(--text-muted)', transition: 'all 0.15s ease', flexShrink: 0,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--primary-purple)'; e.currentTarget.style.borderColor = 'var(--primary-purple-border)'; e.currentTarget.style.background = 'var(--primary-purple-light)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.background = '#ffffff'; }}
+            >
+              <GitCompare size={15} />
+            </button>
+          )}
+          </div>
         ))}
       </div>
       </div>
