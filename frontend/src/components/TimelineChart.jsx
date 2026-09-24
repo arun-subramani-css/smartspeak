@@ -40,8 +40,9 @@ const fmt = (s) => {
   return m > 0 ? `${m}m${String(sec).padStart(2, '0')}s` : `${sec}s`;
 };
 
-export function TimelineChart({ speechAnalysis, visualAnalysis, fusionReport }) {
+export function TimelineChart({ speechAnalysis, visualAnalysis, fusionReport, onSeek }) {
   const [hidden, setHidden] = useState(new Set());
+  const canSeek = typeof onSeek === 'function';
 
   const toggle = (key) => {
     setHidden((prev) => {
@@ -179,20 +180,27 @@ export function TimelineChart({ speechAnalysis, visualAnalysis, fusionReport }) 
 
         {/* Head-movement trigger ticks across the curve area */}
         {isVisible('head') && headTicks.map((t, i) => (
-          <line key={i} x1={x(t)} y1={TOP_PAD} x2={x(t)} y2={TOP_PAD + CURVE_H} stroke="#dc2626" strokeWidth="1.4" opacity="0.55">
-            <title>{`Rapid head movement @ ${fmt(Number(t))}`}</title>
+          <line
+            key={i}
+            x1={x(t)} y1={TOP_PAD} x2={x(t)} y2={TOP_PAD + CURVE_H}
+            stroke="#dc2626" strokeWidth="1.4" opacity="0.55"
+            onClick={canSeek ? () => onSeek(Number(t)) : undefined}
+            style={canSeek ? { cursor: 'pointer' } : undefined}
+          >
+            <title>{canSeek ? `Rapid head movement @ ${fmt(Number(t))} — click to watch` : `Rapid head movement @ ${fmt(Number(t))}`}</title>
           </line>
         ))}
 
         {/* Fillers (diamonds) & repetitions */}
         {isVisible('fillers') && fillers.map((f, i) => {
           const cx = x(f.timestamp);
-          const cy = yWpm(Math.min(maxWpm, 9999)) + 12; // sit just under the top edge
           const py = TOP_PAD + 10;
           return (
             <polygon key={i} points={`${cx},${py - 5} ${cx + 4.4},${py} ${cx},${py + 5} ${cx - 4.4},${py}`}
-              fill="#f59e0b" stroke="#92400e" strokeWidth="0.8">
-              <title>{`Filler "${f.word}" @ ${fmt(Number(f.timestamp))}`}</title>
+              fill="#f59e0b" stroke="#92400e" strokeWidth="0.8"
+              onClick={canSeek ? () => onSeek(Number(f.timestamp)) : undefined}
+              style={canSeek ? { cursor: 'pointer' } : undefined}>
+              <title>{canSeek ? `Filler "${f.word}" @ ${fmt(Number(f.timestamp))} — click to watch` : `Filler "${f.word}" @ ${fmt(Number(f.timestamp))}`}</title>
             </polygon>
           );
         })}
@@ -201,8 +209,10 @@ export function TimelineChart({ speechAnalysis, visualAnalysis, fusionReport }) 
           const py = TOP_PAD + 22;
           return (
             <polygon key={i} points={`${cx},${py - 5} ${cx + 4.4},${py} ${cx},${py + 5} ${cx - 4.4},${py}`}
-              fill="#8b5cf6" stroke="#5b21b6" strokeWidth="0.8">
-              <title>{`Repetition "${r.phrase}" ×${r.count} @ ${fmt(Number(r.timestamp))}`}</title>
+              fill="#8b5cf6" stroke="#5b21b6" strokeWidth="0.8"
+              onClick={canSeek ? () => onSeek(Number(r.timestamp)) : undefined}
+              style={canSeek ? { cursor: 'pointer' } : undefined}>
+              <title>{canSeek ? `Repetition "${r.phrase}" ×${r.count} @ ${fmt(Number(r.timestamp))} — click to watch` : `Repetition "${r.phrase}" ×${r.count} @ ${fmt(Number(r.timestamp))}`}</title>
             </polygon>
           );
         })}
@@ -213,8 +223,10 @@ export function TimelineChart({ speechAnalysis, visualAnalysis, fusionReport }) 
           const py = TOP_PAD + CURVE_H + 6;
           return (
             <polygon key={i} points={`${cx},${py - 5.5} ${cx + 5},${py} ${cx},${py + 5.5} ${cx - 5},${py}`}
-              fill={m.severity === 'high' ? '#dc2626' : '#991b1b'} opacity="0.92">
-              <title>{`${m.description} @ ${fmt(Number(m.timestamp))}`}</title>
+              fill={m.severity === 'high' ? '#dc2626' : '#991b1b'} opacity="0.92"
+              onClick={canSeek ? () => onSeek(Number(m.timestamp)) : undefined}
+              style={canSeek ? { cursor: 'pointer' } : undefined}>
+              <title>{canSeek ? `${m.description} @ ${fmt(Number(m.timestamp))} — click to watch` : `${m.description} @ ${fmt(Number(m.timestamp))}`}</title>
             </polygon>
           );
         })}
@@ -238,8 +250,17 @@ export function TimelineChart({ speechAnalysis, visualAnalysis, fusionReport }) 
                 const rx = x(r.start_time);
                 const rw = Math.max(2.5, x(r.end_time) - rx);
                 return (
-                  <rect key={i} x={rx} y={y} width={rw} height={LANE_H} rx="3" fill={fill} opacity="0.75">
-                    <title>{`${label}: ${fmt(Number(r.start_time))} – ${fmt(Number(r.end_time))} (${(Number(r.duration) || 0).toFixed(1)}s)`}</title>
+                  <rect
+                    key={i}
+                    x={rx} y={y} width={rw} height={LANE_H} rx="3"
+                    fill={fill} opacity="0.75"
+                    onClick={canSeek ? () => onSeek(Number(r.start_time)) : undefined}
+                    style={canSeek ? { cursor: 'pointer' } : undefined}
+                  >
+                    <title>{canSeek
+                      ? `${label}: ${fmt(Number(r.start_time))} – ${fmt(Number(r.end_time))} (${(Number(r.duration) || 0).toFixed(1)}s) — click to watch`
+                      : `${label}: ${fmt(Number(r.start_time))} – ${fmt(Number(r.end_time))} (${(Number(r.duration) || 0).toFixed(1)}s)`}
+                    </title>
                   </rect>
                 );
               })}

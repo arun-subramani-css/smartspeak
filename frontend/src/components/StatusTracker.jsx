@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   RefreshCw, CheckCircle2, Clock, AlertTriangle, Music, Image as ImageIcon,
-  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2, Award, TrendingUp, Download
+  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2, Award, TrendingUp, Download, MousePointerClick
 } from 'lucide-react';
 import { TimelineChart } from './TimelineChart';
+import { ReportVideoProvider, ReportVideoPlayer, useReportVideo } from './ReportVideoPlayer';
+import { InteractiveTranscript } from './InteractiveTranscript';
 
 function scoreColor(v) {
   if (v >= 70) return '#10b981';
@@ -26,6 +28,31 @@ function MetricBar({ value, color }) {
       }} />
     </div>
   );
+}
+
+/**
+ * Seekable — wraps any timestamped annotation. When the session video is
+ * available, clicking it seeks the video to `t`; otherwise it renders as a
+ * normal non-clickable element.
+ */
+function Seekable({ t, children, style, as: El = 'span', ...rest }) {
+  const { seekTo, hasVideo } = useReportVideo();
+  return (
+    <El
+      onClick={hasVideo ? () => seekTo(t) : undefined}
+      title={hasVideo ? 'Click to watch this moment' : undefined}
+      style={{ ...style, ...(hasVideo ? { cursor: 'pointer' } : {}) }}
+      {...rest}
+    >
+      {children}
+    </El>
+  );
+}
+
+/** Passes the video seek callback into the timeline chart. */
+function TimelineWithSeek(props) {
+  const { seekTo } = useReportVideo();
+  return <TimelineChart {...props} onSeek={seekTo} />;
 }
 
 export function StatusTracker({ sessionId, onReset }) {
@@ -236,6 +263,7 @@ export function StatusTracker({ sessionId, onReset }) {
       </div>
 
       <div className="pro-card-body">
+        <ReportVideoProvider sessionId={sessionId}>
         {/* Session Metadata Banner — compact while processing */}
         <div className="no-print" style={{
           background: 'var(--bg-subtle)',
@@ -370,6 +398,9 @@ export function StatusTracker({ sessionId, onReset }) {
                 {getStatusBadge(statusData.status)}
               </div>
             </div>
+
+            {/* Session Video — hidden entirely when the file is gone */}
+            <ReportVideoPlayer />
 
             {/* Error Banner */}
             {statusData.status === 'failed' && (
@@ -523,27 +554,28 @@ export function StatusTracker({ sessionId, onReset }) {
                     <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'rgba(255, 255, 255, 0.75)', fontWeight: 700 }}>
                       Key Behavioral Feedback ({fusionReport.mistakes.length} moments identified)
                     </span>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                      {fusionReport.mistakes.slice(0, 5).map((m, idx) => (
-                        <div key={idx} style={{
-                          background: 'rgba(0, 0, 0, 0.25)',
-                          borderRadius: '8px',
-                          padding: '6px 12px',
-                          fontSize: '0.8rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          border: '1px solid rgba(255, 255, 255, 0.1)'
-                        }}>
-                          <span style={{
-                            width: '8px',
-                            height: '8px',
-                            borderRadius: '50%',
-                            background: m.severity === 'high' ? '#f87171' : m.severity === 'medium' ? '#fbbf24' : '#60a5fa'
-                          }} />
-                          <span>{m.description}</span>
-                          <span style={{ opacity: 0.6, fontSize: '0.72rem' }}>@{m.timestamp.toFixed(1)}s</span>
-                        </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>                        {fusionReport.mistakes.slice(0, 5).map((m, idx) => (
+                          <Seekable key={idx} t={m.timestamp} as="div" style={{
+                            background: 'rgba(0, 0, 0, 0.25)',
+                            borderRadius: '8px',
+                            padding: '6px 12px',
+                            fontSize: '0.8rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            transition: 'background 0.15s ease'
+                          }}>
+                            <span style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              background: m.severity === 'high' ? '#f87171' : m.severity === 'medium' ? '#fbbf24' : '#60a5fa',
+                              flexShrink: 0
+                            }} />
+                            <span>{m.description}</span>
+                            <span style={{ opacity: 0.6, fontSize: '0.72rem' }}>@{Number(m.timestamp).toFixed(1)}s</span>
+                          </Seekable>
                       ))}
                     </div>
                   </div>
@@ -561,7 +593,7 @@ export function StatusTracker({ sessionId, onReset }) {
                     </span>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
                       {fusionReport.speech_gesture_correlation.slice(0, 6).map((c, i) => (
-                        <div key={i} style={{
+                        <Seekable key={i} t={c.timestamp} as="div" style={{
                           background: 'rgba(0, 0, 0, 0.25)',
                           border: '1px solid rgba(255, 255, 255, 0.1)',
                           borderRadius: '8px',
@@ -569,7 +601,8 @@ export function StatusTracker({ sessionId, onReset }) {
                           fontSize: '0.8rem',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '8px'
+                          gap: '8px',
+                          transition: 'background 0.15s ease'
                         }}>
                           <span style={{
                             width: '8px',
@@ -580,7 +613,7 @@ export function StatusTracker({ sessionId, onReset }) {
                           }} />
                           <span>{c.description}</span>
                           <span style={{ opacity: 0.6, fontSize: '0.72rem' }}>@{Number(c.timestamp).toFixed(1)}s</span>
-                        </div>
+                        </Seekable>
                       ))}
                     </div>
                   </div>
@@ -771,7 +804,7 @@ export function StatusTracker({ sessionId, onReset }) {
                 {/* SESSION TIMELINE OVERVIEW */}
                 {speechAnalysis && visualAnalysis && (
                   <div className="print-break-avoid">
-                    <TimelineChart
+                    <TimelineWithSeek
                       speechAnalysis={speechAnalysis}
                       visualAnalysis={visualAnalysis}
                       fusionReport={fusionReport}
@@ -811,7 +844,7 @@ export function StatusTracker({ sessionId, onReset }) {
                       borderRadius: 'var(--radius-lg)',
                       padding: '20px'
                     }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: 6 }}>
                         <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <MessageSquare size={18} color="var(--primary-purple)" />
                           <span>Speech Transcript</span>
@@ -821,23 +854,7 @@ export function StatusTracker({ sessionId, onReset }) {
                         </span>
                       </div>
 
-                      <div style={{
-                        background: 'var(--bg-subtle)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '16px',
-                        fontSize: '0.92rem',
-                        lineHeight: 1.6,
-                        color: 'var(--text-primary)',
-                        maxHeight: '180px',
-                        overflowY: 'auto'
-                      }}>
-                        {speechAnalysis.transcript_text ? (
-                          <p>"{speechAnalysis.transcript_text}"</p>
-                        ) : (
-                          <em style={{ color: 'var(--text-muted)' }}>No spoken words detected in audio.</em>
-                        )}
-                      </div>
+                      <InteractiveTranscript speechAnalysis={speechAnalysis} />
                     </div>
 
                     {/* Metrics Grid: Filler Words, WPM, Long Pauses, Repetitions */}
@@ -862,7 +879,7 @@ export function StatusTracker({ sessionId, onReset }) {
                         {speechAnalysis.filler_words && speechAnalysis.filler_words.length > 0 ? (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', maxHeight: '140px', overflowY: 'auto' }}>
                             {speechAnalysis.filler_words.map((item, idx) => (
-                              <span key={idx} style={{
+                              <Seekable key={idx} t={item.timestamp} style={{
                                 background: '#fef3c7',
                                 color: '#92400e',
                                 border: '1px solid #fde68a',
@@ -872,7 +889,7 @@ export function StatusTracker({ sessionId, onReset }) {
                                 fontWeight: 600
                               }}>
                                 "{item.word}" @ {item.timestamp}s
-                              </span>
+                              </Seekable>
                             ))}
                           </div>
                         ) : (
@@ -949,7 +966,7 @@ export function StatusTracker({ sessionId, onReset }) {
                         {speechAnalysis.long_pauses && speechAnalysis.long_pauses.length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
                             {speechAnalysis.long_pauses.map((pause, idx) => (
-                              <div key={idx} style={{
+                              <Seekable key={idx} t={pause.start_time} as="div" style={{
                                 background: '#eff6ff',
                                 border: '1px solid #bfdbfe',
                                 color: '#1e40af',
@@ -961,7 +978,7 @@ export function StatusTracker({ sessionId, onReset }) {
                               }}>
                                 <span>Gap: {pause.start_time}s ➔ {pause.end_time}s</span>
                                 <strong>{pause.duration}s pause</strong>
-                              </div>
+                              </Seekable>
                             ))}
                           </div>
                         ) : (
@@ -991,7 +1008,7 @@ export function StatusTracker({ sessionId, onReset }) {
                         {speechAnalysis.repetitions && speechAnalysis.repetitions.length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
                             {speechAnalysis.repetitions.map((rep, idx) => (
-                              <div key={idx} style={{
+                              <Seekable key={idx} t={rep.timestamp} as="div" style={{
                                 background: '#f3e8ff',
                                 border: '1px solid #e9d5ff',
                                 color: '#6b21a8',
@@ -1003,7 +1020,7 @@ export function StatusTracker({ sessionId, onReset }) {
                               }}>
                                 <span>"{rep.phrase}"</span>
                                 <span>@{rep.timestamp}s ({rep.count}x)</span>
-                              </div>
+                              </Seekable>
                             ))}
                           </div>
                         ) : (
@@ -1117,6 +1134,7 @@ export function StatusTracker({ sessionId, onReset }) {
             )}
           </div>
         )}
+        </ReportVideoProvider>
       </div>
     </div>
   );

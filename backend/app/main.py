@@ -107,6 +107,10 @@ app.include_router(speech_analysis.router)
 app.include_router(visual_analysis.router)
 app.include_router(fusion.router)
 
+# Media streaming (session video with HTTP range support)
+from app.routers import media as media_router  # noqa: E402
+app.include_router(media_router.router)
+
 
 @app.get("/")
 async def root():
