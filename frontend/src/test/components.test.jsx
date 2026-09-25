@@ -5,6 +5,8 @@ import { TimelineChart } from '../components/TimelineChart';
 import { RecentReports } from '../components/RecentReports';
 import { SessionCompare } from '../components/SessionCompare';
 import { ImprovementPlan } from '../components/ImprovementPlan';
+import { VideoUploader } from '../components/VideoUploader';
+import { fireEvent } from '@testing-library/react';
 
 // ---- Shared fixtures -------------------------------------------------------
 
@@ -361,5 +363,47 @@ describe('ImprovementPlan', () => {
     };
     render(<ImprovementPlan fusionReport={report} />);
     expect(screen.getByText(/now within the healthy range/)).toBeInTheDocument();
+  });
+});
+
+// ---- VideoUploader ----------------------------------------------------------
+
+describe('VideoUploader', () => {
+  it('sends the selected file when Start Analysis is clicked (regression: click event passed as file)', async () => {
+    const openCalls = [];
+    class MockXHR {
+      constructor() { this.upload = {}; }
+      open(method, url) { openCalls.push({ method, url }); }
+      send() {
+        this.status = 201;
+        this.responseText = JSON.stringify({ session_id: 's-regression-1' });
+        this.onload?.();
+      }
+    }
+    const originalXHR = global.XMLHttpRequest;
+    global.XMLHttpRequest = MockXHR;
+    try {
+      const onUploadSuccess = vi.fn();
+      render(<VideoUploader onUploadSuccess={onUploadSuccess} />);
+
+      const file = new File([new Uint8Array(64)], 'take.mp4', { type: 'video/mp4' });
+      fireEvent.drop(screen.getByRole('button', { name: /drag and drop/i }), { dataTransfer: { files: [file] } });
+
+      const cta = screen.getByRole('button', { name: /start analysis/i });
+      expect(cta).not.toBeDisabled();
+      await userEvent.click(cta); // crashed with TypeError before the () => handleUpload() fix
+
+      await waitFor(() => expect(openCalls[0]).toEqual({ method: 'POST', url: '/api/v1/upload' }));
+      await waitFor(() => expect(onUploadSuccess).toHaveBeenCalledWith('s-regression-1'));
+    } finally {
+      global.XMLHttpRequest = originalXHR;
+    }
+  });
+
+  it('rejects unsupported extensions with a visible alert', () => {
+    render(<VideoUploader onUploadSuccess={() => {}} />);
+    const file = new File([new Uint8Array(64)], 'clip.txt', { type: 'text/plain' });
+    fireEvent.drop(screen.getByRole('button', { name: /drag and drop/i }), { dataTransfer: { files: [file] } });
+    expect(screen.getByRole('alert')).toHaveTextContent(/unsupported file format/i);
   });
 });

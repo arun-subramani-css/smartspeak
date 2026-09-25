@@ -343,7 +343,7 @@ export function VideoUploader({ onUploadSuccess }) {
         {/* CTA — stable so it never flashes */}
         <button
           className="btn-purple"
-          onClick={handleUpload}
+          onClick={() => handleUpload()}
           disabled={!selectedFile || isUploading}
           style={{ width: '100%', padding: '14px', marginTop: '20px' }}
         >
