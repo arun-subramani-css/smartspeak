@@ -20,11 +20,6 @@ TARGETS = {
 }
 
 
-def _fmt(value: float) -> str:
-    value = round(float(value), 1)
-    return f"{value:g}"
-
-
 def _build_filler_action(speech: Dict[str, Any], total_words: int) -> Optional[ImprovementAction]:
     filler_count = int(speech.get("filler_word_count") or 0)
     fillers = speech.get("filler_words") or []

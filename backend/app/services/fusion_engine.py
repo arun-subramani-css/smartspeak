@@ -8,7 +8,7 @@ from app.models.session import (
     MistakeItem,
     SessionStatus,
 )
-from app.services.improvement_plan import compute_improvement_plan, pick_focus_goal, METRIC_LABELS
+from app.services.improvement_plan import compute_improvement_plan, pick_focus_goal
 
 logger = logging.getLogger("smartspeak.fusion_engine")
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   RefreshCw, CheckCircle2, Clock, AlertTriangle, Music, Image as ImageIcon,
-  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Volume2, Award, TrendingUp, Download, MousePointerClick
+  Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Download
 } from 'lucide-react';
 import { TimelineChart } from './TimelineChart';
 import { ReportVideoProvider, ReportVideoPlayer, useReportVideo } from './ReportVideoPlayer';

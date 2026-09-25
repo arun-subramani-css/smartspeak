@@ -10,7 +10,7 @@ import { Sparkles, Check } from 'lucide-react';
 
 export default function App() {
   // Persist the active session across refreshes so an in-progress upload
-  // isn't lost when the tab reloads. 'done' is cleared on reset.
+  // isn't lost when the tab reloads.
   const [currentSessionId, setCurrentSessionId] = useState(
     () => localStorage.getItem('smartspeak.activeSession') || null
   );
@@ -25,11 +25,18 @@ export default function App() {
     }
   }, [currentSessionId]);
 
-  const handleUploadSuccess = (sessionId) => {
+  // Opening any session is a navigation: any stale comparison is left behind.
+  const openSession = (sessionId) => {
+    setComparePair(null);
     setCurrentSessionId(sessionId);
   };
 
+  const handleUploadSuccess = (sessionId) => {
+    openSession(sessionId);
+  };
+
   const handleReset = () => {
+    setComparePair(null);
     setCurrentSessionId(null);
   };
 
@@ -141,13 +148,13 @@ export default function App() {
               <SessionCompare
                 olderId={comparePair.olderId}
                 newerId={comparePair.newerId}
-                onOpenSession={setCurrentSessionId}
+                onOpenSession={openSession}
                 onClose={() => setComparePair(null)}
               />
             )}
             <VideoUploader onUploadSuccess={handleUploadSuccess} />
             <RecentReports
-              onOpenSession={setCurrentSessionId}
+              onOpenSession={openSession}
               onCompareSession={(id, prevId) => setComparePair({ olderId: prevId, newerId: id })}
             />
             <ScoreTrendChart />

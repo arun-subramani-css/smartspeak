@@ -175,6 +175,7 @@ def build_focus_goal_progress(
     if goal not in GOAL_FIELDS:
         return None
     field, lower_better = GOAL_FIELDS[goal]
+    is_band = (goal == "wpm")
 
     def value_of(snapshot: SessionMetricSnapshot) -> Optional[float]:
         return getattr(snapshot, field, None)
@@ -184,14 +185,44 @@ def build_focus_goal_progress(
     if older_value is None or newer_value is None:
         return None
 
-    improved = (newer_value < older_value) if lower_better else (newer_value > older_value)
-    if abs(newer_value - older_value) < 0.05:
-        summary = f"{_metric_label(goal)} held steady at {newer_value:g}"
-        improved = False
-    elif improved:
-        summary = f"{_metric_label(goal)} improved from {older_value:g} to {newer_value:g}"
+    def band_distance(v: float) -> float:
+        # Same ideal band the scorer and the wpm delta use: 130-160 WPM.
+        if v < 130.0:
+            return 130.0 - v
+        if v > 160.0:
+            return v - 160.0
+        return 0.0
+
+    if is_band:
+        # Pace progress = movement toward the ideal band, so a slow speaker
+        # going 100 -> 140 WPM counts as improved, not regressed.
+        dist_old, dist_new = band_distance(older_value), band_distance(newer_value)
+        in_band_new = dist_new == 0
+        if abs(dist_new - dist_old) < 0.05:
+            summary = f"{_metric_label(goal)} held steady at {newer_value:g} WPM"
+            improved = False
+        elif dist_new < dist_old:
+            improved = True
+            summary = (
+                f"{_metric_label(goal)} moved into the ideal 130–160 range "
+                f"({older_value:g} → {newer_value:g} WPM)"
+                if in_band_new
+                else f"{_metric_label(goal)} closer to the ideal band ({older_value:g} → {newer_value:g} WPM)"
+            )
+        else:
+            improved = False
+            summary = (
+                f"{_metric_label(goal)} drifted from {older_value:g} to {newer_value:g} WPM — still a focus area"
+            )
     else:
-        summary = f"{_metric_label(goal)} went from {older_value:g} to {newer_value:g} — still a focus area"
+        improved = (newer_value < older_value) if lower_better else (newer_value > older_value)
+        if abs(newer_value - older_value) < 0.05:
+            summary = f"{_metric_label(goal)} held steady at {newer_value:g}"
+            improved = False
+        elif improved:
+            summary = f"{_metric_label(goal)} improved from {older_value:g} to {newer_value:g}"
+        else:
+            summary = f"{_metric_label(goal)} went from {older_value:g} to {newer_value:g} — still a focus area"
 
     return FocusGoalProgress(
         goal_metric=goal,

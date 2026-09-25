@@ -12,10 +12,6 @@ import {
  * compare endpoint; the component only renders presentation.
  */
 
-const fmtTime = (s) => (Number.isFinite(Number(s))
-  ? `${Number(s).toFixed(1)}${s.unit || ''}`
-  : '–');
-
 function DirectionChip({ direction }) {
   if (direction === 'improved') {
     return (

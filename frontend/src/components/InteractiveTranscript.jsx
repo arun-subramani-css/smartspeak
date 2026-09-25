@@ -115,10 +115,6 @@ export function InteractiveTranscript({ speechAnalysis }) {
 
   if (!model) return null;
 
-  const seekHint = hasVideo
-    ? 'click any highlight to watch that moment'
-    : 'video not available for this session';
-
   const legend = (sa.filler_words?.length > 0 || sa.repetitions?.length > 0 || sa.long_pauses?.length > 0) ? (
     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 10, marginBottom: 0, display: 'flex', alignItems: 'flex-start', gap: 5 }}>
       <MousePointerClick size={13} style={{ flexShrink: 0, marginTop: 2 }} />

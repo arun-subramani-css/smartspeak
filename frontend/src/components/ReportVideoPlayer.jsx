@@ -112,7 +112,7 @@ export function ReportVideoPlayer() {
   };
 
   return (
-    <div className="animate-fade-in print-break-avoid" style={{
+    <div className="animate-fade-in no-print" style={{
       background: '#0f172a',
       borderRadius: 'var(--radius-lg)',
       padding: '16px',

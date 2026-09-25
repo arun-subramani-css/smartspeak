@@ -3,6 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TimelineChart } from '../components/TimelineChart';
 import { RecentReports } from '../components/RecentReports';
+import { SessionCompare } from '../components/SessionCompare';
+import { ImprovementPlan } from '../components/ImprovementPlan';
 
 // ---- Shared fixtures -------------------------------------------------------
 
@@ -206,5 +208,158 @@ describe('RecentReports', () => {
     await waitFor(() => expect(container).toBeEmptyDOMElement());
     expect(errSpy).toHaveBeenCalled();
     errSpy.mockRestore();
+  });
+});
+
+// ---- SessionCompare ---------------------------------------------------------
+
+describe('SessionCompare', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const comparePayload = {
+    older: { session_id: 'old-1', original_filename: 'old-talk.mp4', smartspeak_index: 62, grade: 'Developing' },
+    newer: { session_id: 'new-1', original_filename: 'new-talk.mp4', smartspeak_index: 72, grade: 'Polished' },
+    score_delta: 10,
+    score_direction: 'improved',
+    deltas: [
+      { metric: 'filler_ratio', label: 'Filler words', unit: '%', older: 9, newer: 3, delta: -6, direction: 'improved', verdict: '-6% vs before' },
+      { metric: 'wpm', label: 'Speaking pace', unit: ' WPM', older: 185, newer: 150, delta: -35, direction: 'improved', verdict: 'now in the ideal 130–160 range' },
+      { metric: 'eye_contact', label: 'Eye contact', unit: '%', older: 30, newer: 22, delta: -8, direction: 'regressed', verdict: '-8% vs before' },
+      { metric: 'posture', label: 'Posture', unit: '%', older: 70, newer: 70, delta: 0, direction: 'same', verdict: 'unchanged' },
+    ],
+    focus_goal_progress: {
+      goal_metric: 'fillers', goal_label: 'Filler words', older_value: 18, newer_value: 6,
+      improved: true, summary: 'Filler words improved from 18 to 6',
+    },
+  };
+
+  const mockCompare = (payload, ok = true) =>
+    vi.fn(() => Promise.resolve({ ok, status: ok ? 200 : 400, json: () => Promise.resolve(payload) }));
+
+  it('renders the score delta front and center with both session cards', async () => {
+    global.fetch = mockCompare(comparePayload);
+    render(<SessionCompare olderId="old-1" newerId="new-1" />);
+    expect(await screen.findByText('Session Comparison')).toBeInTheDocument();
+    expect(screen.getByText('old-talk.mp4')).toBeInTheDocument();
+    expect(screen.getByText('new-talk.mp4')).toBeInTheDocument();
+    expect(screen.getByText('+10')).toBeInTheDocument();
+    expect(screen.getAllByText('improved').length).toBeGreaterThan(0);
+  });
+
+  it('renders metric rows with old → new values and direction chips', async () => {
+    global.fetch = mockCompare(comparePayload);
+    render(<SessionCompare olderId="old-1" newerId="new-1" />);
+    await screen.findByText('Session Comparison');
+    expect(screen.getByText('185 WPM')).toBeInTheDocument();   // wpm band metric formatting
+    expect(screen.getByText('9%')).toBeInTheDocument();
+    expect(screen.getByText('3%')).toBeInTheDocument();
+    expect(screen.getByText('regressed')).toBeInTheDocument();  // honest regression chip
+    expect(screen.getByText('same')).toBeInTheDocument();
+  });
+
+  it('renders the focus-goal progress banner between the sessions', async () => {
+    global.fetch = mockCompare(comparePayload);
+    render(<SessionCompare olderId="old-1" newerId="new-1" />);
+    await screen.findByText('Session Comparison');
+    expect(screen.getByText(/Focus goal was filler words/i)).toBeInTheDocument();
+    expect(screen.getByText(/improved from 18 to 6/)).toBeInTheDocument();
+  });
+
+  it('hides the goal banner when the older session predates focus goals', async () => {
+    global.fetch = mockCompare({ ...comparePayload, focus_goal_progress: null });
+    render(<SessionCompare olderId="old-1" newerId="new-1" />);
+    await screen.findByText('Session Comparison');
+    expect(screen.queryByText(/Focus goal was/i)).not.toBeInTheDocument();
+  });
+
+  it('shows a friendly error with a working Close button on failure', async () => {
+    global.fetch = mockCompare({ detail: 'Session not found' }, false);
+    const onClose = vi.fn();
+    render(<SessionCompare olderId="gone" newerId="new-1" onClose={onClose} />);
+    expect(await screen.findByText('Comparison unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Session not found')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('invokes onOpenSession when a session card is clicked', async () => {
+    global.fetch = mockCompare(comparePayload);
+    const onOpenSession = vi.fn();
+    render(<SessionCompare olderId="old-1" newerId="new-1" onOpenSession={onOpenSession} />);
+    await screen.findByText('Session Comparison');
+    await userEvent.click(screen.getByText('new-talk.mp4'));
+    expect(onOpenSession).toHaveBeenCalledWith('new-1');
+  });
+
+  it('explains when there are no comparable metrics', async () => {
+    global.fetch = mockCompare({ ...comparePayload, deltas: [] });
+    render(<SessionCompare olderId="old-1" newerId="new-1" />);
+    expect(await screen.findByText(/No comparable metrics/)).toBeInTheDocument();
+  });
+});
+
+// ---- ImprovementPlan --------------------------------------------------------
+
+describe('ImprovementPlan', () => {
+  it('renders nothing for a clean report with no plan and no previous goal', () => {
+    const { container } = render(<ImprovementPlan fusionReport={{ smartspeak_index: 90 }} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('renders the ranked plan with real current values', () => {
+    const report = {
+      improvement_plan: [
+        { metric: 'fillers', title: 'Cut filler words', drill: "You used 'um' 8 times — pause silently instead", current_value: 8 },
+        { metric: 'posture', title: 'Reset your stance', drill: '18 of 90 frames showed slouched shoulders', current_value: 80 },
+      ],
+    };
+    render(<ImprovementPlan fusionReport={report} />);
+    expect(screen.getByText('Your improvement plan')).toBeInTheDocument();
+    expect(screen.getByText('Cut filler words')).toBeInTheDocument();
+    expect(screen.getByText(/pause silently instead/)).toBeInTheDocument();
+    // Rank badges and per-metric labels
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getAllByText('Filler words').length).toBeGreaterThan(0);
+    // "now" values formatted per metric
+    expect(screen.getByText('8')).toBeInTheDocument();
+    expect(screen.getByText('80%')).toBeInTheDocument();
+  });
+
+  it("shows 'target met' when the previous goal is absent from this plan", () => {
+    const report = {
+      previous_focus_goal: 'fillers',
+      improvement_plan: [
+        { metric: 'posture', title: 'Reset your stance', drill: 'slouched shoulders', current_value: 80 },
+      ],
+    };
+    render(<ImprovementPlan fusionReport={report} />);
+    expect(screen.getByText(/Last session's focus/i)).toBeInTheDocument();
+    expect(screen.getByText(/target met this session/)).toBeInTheDocument();
+  });
+
+  it('shows the remaining gap when the previous goal is still in the plan', () => {
+    const report = {
+      previous_focus_goal: 'eye_contact',
+      improvement_plan: [
+        { metric: 'eye_contact', title: 'Anchor your gaze', drill: '49% eye contact', current_value: 49 },
+      ],
+    };
+    render(<ImprovementPlan fusionReport={report} />);
+    // target min 60% -> 11 points away
+    expect(screen.getByText(/~11% away/)).toBeInTheDocument();
+  });
+
+  it('uses the healthy-range wording for band goals like pace', () => {
+    const report = {
+      previous_focus_goal: 'wpm',
+      improvement_plan: [
+        { metric: 'fillers', title: 'Cut filler words', drill: 'pause silently', current_value: 4 },
+      ],
+    };
+    render(<ImprovementPlan fusionReport={report} />);
+    expect(screen.getByText(/now within the healthy range/)).toBeInTheDocument();
   });
 });
