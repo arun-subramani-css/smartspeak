@@ -150,7 +150,7 @@ export function InteractiveTranscript({ speechAnalysis }) {
         out.push(
           <span
             key={`pause-${key++}`}
-            title={hasVideo ? `Long pause ${fmt(pause.start_time)}–${fmt(pause.end_time)} — click to watch` : `Long pause (${Number(p.duration).toFixed(1)}s)`}
+            title={hasVideo ? `Long pause ${fmt(pause.start_time)}–${fmt(pause.end_time)} — click to watch` : `Long pause (${Number(pause.duration).toFixed(1)}s)`}
             onClick={() => handleSeek(pause.start_time, 'pause')}
             style={{
               display: 'inline-flex', alignItems: 'center', margin: '0 4px', padding: '0 8px',
@@ -159,7 +159,7 @@ export function InteractiveTranscript({ speechAnalysis }) {
               verticalAlign: 'middle', lineHeight: '20px',
             }}
           >
-            ⏸ {Number(p.duration).toFixed(1)}s
+            ⏸ {Number(pause.duration).toFixed(1)}s
           </span>
         );
       }

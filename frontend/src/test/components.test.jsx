@@ -6,6 +6,8 @@ import { RecentReports } from '../components/RecentReports';
 import { SessionCompare } from '../components/SessionCompare';
 import { ImprovementPlan } from '../components/ImprovementPlan';
 import { VideoUploader } from '../components/VideoUploader';
+import { ReportVideoProvider } from '../components/ReportVideoPlayer';
+import { InteractiveTranscript } from '../components/InteractiveTranscript';
 import { fireEvent } from '@testing-library/react';
 
 // ---- Shared fixtures -------------------------------------------------------
@@ -405,5 +407,61 @@ describe('VideoUploader', () => {
     const file = new File([new Uint8Array(64)], 'clip.txt', { type: 'text/plain' });
     fireEvent.drop(screen.getByRole('button', { name: /drag and drop/i }), { dataTransfer: { files: [file] } });
     expect(screen.getByRole('alert')).toHaveTextContent(/unsupported file format/i);
+  });
+});
+
+// ---- InteractiveTranscript --------------------------------------------------
+
+describe('InteractiveTranscript', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    // Provider probes video availability; return "unavailable" deterministically.
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ available: false }) }));
+  });
+
+  const speechWithWordsAndPauses = {
+    transcript_text: 'I think that was good',
+    words: [
+      { word: 'I', start: 0.0, end: 0.2 },
+      { word: 'think', start: 0.3, end: 0.7 },
+      { word: 'that', start: 0.8, end: 1.1 },
+      { word: 'was', start: 1.2, end: 1.5 },
+      { word: 'good', start: 1.6, end: 2.0 },
+    ],
+    filler_words: [{ word: 'I', timestamp: 0.1 }],
+    repetitions: [],
+    long_pauses: [{ start_time: 1.1, end_time: 5.3, duration: 4.2 }],
+  };
+
+  it('renders word-timed text with pause pills (regression: ReferenceError on p vs pause)', async () => {
+    render(
+      <ReportVideoProvider sessionId="t-transcript">
+        <InteractiveTranscript speechAnalysis={speechWithWordsAndPauses} />
+      </ReportVideoProvider>,
+    );
+    // Words render inline...
+    expect(screen.getByText('think')).toBeInTheDocument();
+    // ...and the long pause renders as a pill with its real duration
+    // (crashed with "p is not defined" before the pause/p variable fix)
+    expect(screen.getByTitle('Long pause (4.2s)')).toBeInTheDocument();
+  });
+
+  it('falls back to proportional highlighting when word timings are missing', () => {
+    const { container } = render(
+      <ReportVideoProvider sessionId="t-transcript">
+        <InteractiveTranscript
+          speechAnalysis={{
+            transcript_text: 'um so we did the thing',
+            filler_words: [{ word: 'um', timestamp: 1 }],
+            repetitions: [],
+            long_pauses: [],
+          }}
+        />
+      </ReportVideoProvider>,
+    );
+    // Proportional mode marks an estimated slice (position, not exact word)
+    expect(container.querySelectorAll('mark').length).toBeGreaterThan(0);
+    expect(container.querySelector('mark')?.getAttribute('title')).toContain('um');
+    expect(container.textContent).toContain('um so we did the thing');
   });
 });
