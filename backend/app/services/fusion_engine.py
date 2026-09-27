@@ -2,6 +2,66 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+
+# Human-readable phrasing for visual-event machine labels used in compound
+# mistake descriptions ("looking_down" -> "looking down" etc.).
+_VISUAL_PHRASES = {
+    "looking_away": "looking away from the camera",
+    "looking_down": "looking down",
+    "looking_up": "looking up",
+    "poor_posture": "slouching",
+    "excessive_head_movement": "rapid head movement",
+    "head_movement": "rapid head movement",
+    "gesture_flag": "distracting hand movement",
+}
+
+
+def _humanize_compound_events(events: List[str]) -> str:
+    """Turns correlated event labels into coach language.
+
+    'repetition: i am', 'filler_word: um (x2)', 'looking_down' become
+    "Repeated 'i am' while looking down." / "Used the filler 'um' twice while
+    looking down." Falls back to a readable join for unknown labels.
+    """
+    speech: List[str] = []
+    visual: List[str] = []
+    for raw in events:
+        label = str(raw).strip()
+        count = 1
+        import re as _re
+
+        m = _re.search(r"\s*\(x(\d+)\)$", label)
+        if m:
+            count = int(m.group(1))
+            label = label[: m.start()].rstrip()
+
+        prefix, _, value = label.partition(":")
+        prefix = prefix.strip()
+        value = value.strip()
+        count_word = f" ×{count}" if count > 1 else ""
+
+        if prefix == "repetition":
+            speech.append(f"Repeated '{value}'{count_word}")
+        elif prefix == "filler_word":
+            times = f" {count} times" if count > 1 else ""
+            speech.append(f"Used the filler '{value}'{times}")
+        elif prefix == "long_pause":
+            speech.append(f"A {value} pause")
+        elif prefix in _VISUAL_PHRASES:
+            visual.append(_VISUAL_PHRASES[prefix] + count_word)
+        elif label in _VISUAL_PHRASES:
+            visual.append(_VISUAL_PHRASES[label] + count_word)
+        else:
+            visual.append(label.replace("_", " "))
+
+    if speech and visual:
+        return f"{'; '.join(speech)} while {visual[0]}"
+    if speech:
+        return "; ".join(speech)
+    if visual:
+        return f"With {visual[0]}"
+    return "Multiple delivery issues at the same moment"
+
 from app.db.database import Database
 from app.models.session import (
     FusionReportResult,
@@ -215,7 +275,7 @@ def detect_mistakes(
         else:
             severity = "minor"
 
-        desc = f"Compound behavioral cue: correlated {', '.join(evs)}"
+        desc = _humanize_compound_events(evs)
         mistakes.append(MistakeItem(
             timestamp=ts,
             category="compound",

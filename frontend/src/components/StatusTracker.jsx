@@ -10,6 +10,7 @@ import { ImprovementPlan } from './ImprovementPlan';
 import { DeliveryDynamics } from './DeliveryDynamics';
 import { GitCompare } from 'lucide-react';
 import { apiFetch } from '../api/client';
+import { humanizeMistakeDescription } from './mistakeText';
 
 function scoreColor(v) {
   if (v >= 70) return '#10b981';
@@ -603,7 +604,7 @@ export function StatusTracker({ sessionId, onReset, onCompareWithPrevious }) {
                               background: m.severity === 'high' ? '#f87171' : m.severity === 'medium' ? '#fbbf24' : '#60a5fa',
                               flexShrink: 0
                             }} />
-                            <span>{m.description}</span>
+                            <span>{humanizeMistakeDescription(m.description, m.events)}</span>
                             <span style={{ opacity: 0.6, fontSize: '0.72rem' }}>@{Number(m.timestamp).toFixed(1)}s</span>
                           </Seekable>
                       ))}
@@ -641,7 +642,7 @@ export function StatusTracker({ sessionId, onReset, onCompareWithPrevious }) {
                             flexShrink: 0,
                             background: c.events?.includes('fluent') ? '#34d399' : (c.severity === 'medium' ? '#fbbf24' : '#60a5fa')
                           }} />
-                          <span>{c.description}</span>
+                          <span>{humanizeMistakeDescription(c.description, c.events)}</span>
                           <span style={{ opacity: 0.6, fontSize: '0.72rem' }}>@{Number(c.timestamp).toFixed(1)}s</span>
                         </Seekable>
                       ))}

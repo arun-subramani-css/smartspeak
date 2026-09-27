@@ -8,6 +8,7 @@ import { ImprovementPlan } from '../components/ImprovementPlan';
 import { VideoUploader } from '../components/VideoUploader';
 import { ReportVideoProvider } from '../components/ReportVideoPlayer';
 import { InteractiveTranscript } from '../components/InteractiveTranscript';
+import { humanizeMistakeDescription } from '../components/mistakeText';
 import { fireEvent } from '@testing-library/react';
 
 // ---- Shared fixtures -------------------------------------------------------
@@ -444,6 +445,16 @@ describe('InteractiveTranscript', () => {
     // ...and the long pause renders as a pill with its real duration
     // (crashed with "p is not defined" before the pause/p variable fix)
     expect(screen.getByTitle('Long pause (4.2s)')).toBeInTheDocument();
+  });
+
+  it('rewrites legacy compound-mistake labels into coach language', () => {
+    expect(humanizeMistakeDescription(
+      'Compound behavioral cue: correlated repetition: i am, looking_down',
+    )).toBe("Repeated 'i am' while looking down.");
+    expect(humanizeMistakeDescription(
+      'Compound behavioral cue: correlated filler_word: um, looking_down',
+    )).toBe("Used the filler 'um' while looking down.");
+    expect(humanizeMistakeDescription('Used filler word \'um\'')).toBe('Used filler word \'um\'');
   });
 
   it('falls back to proportional highlighting when word timings are missing', () => {
