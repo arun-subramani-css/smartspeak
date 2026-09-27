@@ -246,6 +246,9 @@ class FusionReportResult(BaseModel):
     improvement_plan: list[ImprovementAction] = []
     focus_goal: str | None = None          # metric key of the single worst metric
     previous_focus_goal: str | None = None # focus goal of the prior completed session
+    # Higher-order delivery metrics: energy-curve peak placement, rhythm
+    # entropy, momentum recovery after pauses. Empty for legacy/short sessions.
+    delivery_dynamics: dict = {}
     analyzed_at: datetime
 
 

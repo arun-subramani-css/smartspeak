@@ -9,6 +9,7 @@ from app.models.session import (
     SessionStatus,
 )
 from app.services.improvement_plan import compute_improvement_plan, pick_focus_goal
+from app.services.delivery_dynamics import compute_delivery_dynamics
 
 logger = logging.getLogger("smartspeak.fusion_engine")
 
@@ -622,6 +623,7 @@ def generate_fusion_report_sync(
 
     improvement_plan = compute_improvement_plan(speech_analysis, visual_analysis)
     focus_goal = pick_focus_goal(improvement_plan)
+    delivery_dynamics = compute_delivery_dynamics(speech_analysis)
 
     return FusionReportResult(
         mistakes=mistakes,
@@ -634,6 +636,7 @@ def generate_fusion_report_sync(
         improvement_plan=improvement_plan,
         focus_goal=focus_goal,
         previous_focus_goal=previous_focus_goal,
+        delivery_dynamics=delivery_dynamics,
         analyzed_at=datetime.now(timezone.utc)
     )
 

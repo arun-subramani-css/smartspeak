@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   RefreshCw, CheckCircle2, Clock, AlertTriangle, Music, Image as ImageIcon,
   Copy, Check, ArrowLeft, Film, MessageSquare, Gauge, AlertOctagon, Repeat, Sparkles, Download
@@ -7,7 +7,9 @@ import { TimelineChart } from './TimelineChart';
 import { ReportVideoProvider, ReportVideoPlayer, useReportVideo } from './ReportVideoPlayer';
 import { InteractiveTranscript } from './InteractiveTranscript';
 import { ImprovementPlan } from './ImprovementPlan';
+import { DeliveryDynamics } from './DeliveryDynamics';
 import { GitCompare } from 'lucide-react';
+import { apiFetch } from '../api/client';
 
 function scoreColor(v) {
   if (v >= 70) return '#10b981';
@@ -68,13 +70,37 @@ export function StatusTracker({ sessionId, onReset, onCompareWithPrevious }) {
   const [showAllFrames, setShowAllFrames] = useState(false);
   const [selectedFrameSrc, setSelectedFrameSrc] = useState(null);
 
-  const fetchStatus = async () => {
+  const fetchSpeechAnalysis = useCallback(async () => {
     try {
-      const res = await fetch(`/api/v1/sessions/${sessionId}/status`);
-      if (!res.ok) {
-        throw new Error(`Session status request failed (HTTP ${res.status})`);
-      }
-      const data = await res.json();
+      const data = await apiFetch(`/api/v1/sessions/${sessionId}/speech-analysis`);
+      setSpeechAnalysis(data.speech_analysis);
+    } catch (_e) {
+      console.error("Failed to fetch speech analysis details:");
+    }
+  }, [sessionId]);
+
+  const fetchVisualAnalysis = useCallback(async () => {
+    try {
+      const data = await apiFetch(`/api/v1/sessions/${sessionId}/visual-analysis`);
+      setVisualAnalysis(data.visual_analysis);
+    } catch (_e) {
+      console.error("Failed to fetch visual analysis details:");
+    }
+  }, [sessionId]);
+
+  const fetchFusionReport = useCallback(async () => {
+    try {
+      const data = await apiFetch(`/api/v1/sessions/${sessionId}/fusion-report`);
+      setFusionReport(data.fusion_report);
+    } catch (_e) {
+      // Transient failures during polling are non-fatal; the next poll retries.
+      console.error("Failed to fetch fusion report details");
+    }
+  }, [sessionId]);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const data = await apiFetch(`/api/v1/sessions/${sessionId}/status`);
       setStatusData(data);
       setError(null);
 
@@ -109,50 +135,31 @@ export function StatusTracker({ sessionId, onReset, onCompareWithPrevious }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId, fetchSpeechAnalysis, fetchVisualAnalysis, fetchFusionReport]);
 
-  const fetchSpeechAnalysis = async () => {
-    try {
-      const res = await fetch(`/api/v1/sessions/${sessionId}/speech-analysis`);
-      if (res.ok) {
-        const data = await res.json();
-        setSpeechAnalysis(data.speech_analysis);
-      }
-    } catch (e) {
-      console.error("Failed to fetch speech analysis details:", e);
-    }
-  };
-
-  const fetchVisualAnalysis = async () => {
-    try {
-      const res = await fetch(`/api/v1/sessions/${sessionId}/visual-analysis`);
-      if (res.ok) {
-        const data = await res.json();
-        setVisualAnalysis(data.visual_analysis);
-      }
-    } catch (e) {
-      console.error("Failed to fetch visual analysis details:", e);
-    }
-  };
-
-  const fetchFusionReport = async () => {
-    try {
-      const res = await fetch(`/api/v1/sessions/${sessionId}/fusion-report`);
-      if (res.ok) {
-        const data = await res.json();
-        setFusionReport(data.fusion_report);
-      }
-    } catch (e) {
-      console.error("Failed to fetch fusion report details:", e);
-    }
-  };
+  // Polling stop-condition lives in a ref so the interval callback never
+  // reads stale state and the effect can depend only on the fetcher.
+  const doneRef = useRef(false);
+  useEffect(() => {
+    doneRef.current = Boolean(
+      (statusData && (statusData.status === 'fusion_complete' || statusData.status === 'failed')) ||
+      (statusData?.has_fusion_report && fusionReport),
+    );
+  }, [statusData, fusionReport]);
 
   useEffect(() => {
     if (!sessionId) return;
 
+    // Switching sessions must not flash the previous session's data.
+    setStatusData(null);
+    setSpeechAnalysis(null);
+    setVisualAnalysis(null);
+    setFusionReport(null);
+    setLoading(true);
+
     fetchStatus();
     const interval = setInterval(() => {
-      if (statusData && (statusData.status === 'fusion_complete' || (statusData.has_fusion_report && fusionReport) || statusData.status === 'failed')) {
+      if (doneRef.current) {
         clearInterval(interval);
         return;
       }
@@ -160,7 +167,7 @@ export function StatusTracker({ sessionId, onReset, onCompareWithPrevious }) {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [sessionId, statusData?.status, Boolean(fusionReport)]);
+  }, [sessionId, fetchStatus]);
 
   const copySessionId = () => {
     navigator.clipboard.writeText(sessionId);
@@ -341,6 +348,17 @@ export function StatusTracker({ sessionId, onReset, onCompareWithPrevious }) {
           </div>
         )}
 
+        {error && !statusData && (
+          <div role="alert" style={{
+            background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c',
+            borderRadius: 'var(--radius-lg)', padding: '14px 18px', fontSize: '0.88rem',
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16,
+          }}>
+            <AlertTriangle size={17} style={{ flexShrink: 0 }} />
+            <span><strong>Couldn't load this session:</strong> {error} — retrying automatically.</span>
+          </div>
+        )}
+
         {statusData && (
           <div>
             {/* Session banner stays visible while processing; metadata only once done */}
@@ -435,6 +453,7 @@ export function StatusTracker({ sessionId, onReset, onCompareWithPrevious }) {
 
             {/* Improvement Plan — prescriptive actions, above the score */}
             <ImprovementPlan fusionReport={fusionReport} />
+            <DeliveryDynamics fusionReport={fusionReport} />
 
             {/* Overall Performance & SmartSpeak Index Hero Card */}
             {fusionReport && (

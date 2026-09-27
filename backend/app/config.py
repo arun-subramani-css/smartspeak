@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Comma-separated list of allowed origins; "*" permits all (dev only).
     CORS_ALLOW_ORIGINS: str = "*"
 
+    # Upload rate limiting (per client IP, sliding window).
+    RATE_LIMIT_UPLOAD_PER_HOUR: int = 20
+
     # Audio Enhancement for Speech-to-Text Accuracy
     # FFmpeg filter chain applied to the extracted WAV before Whisper runs.
     AUDIO_ENABLE_DENOISE: bool = True

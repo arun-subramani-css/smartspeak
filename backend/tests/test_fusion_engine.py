@@ -809,3 +809,84 @@ def test_compare_delta_direction_semantics():
     # Missing data on either side -> no row
     assert build_metric_delta("posture", None, 90.0) is None
     assert build_metric_delta("posture", 90.0, None) is None
+
+
+# ----------------------------- Delivery Dynamics -----------------------------
+
+from app.services.delivery_dynamics import (  # noqa: E402
+    analyze_energy_curve,
+    analyze_rhythm_entropy,
+    compute_delivery_dynamics,
+)
+
+
+def _speech_with_windows(wpm_list):
+    """Builds a minimal speech_analysis with windowed WPM series."""
+    return {
+        "wpm_data": {
+            "windowed_wpm": [
+                {"window_start": i * 5.0, "window_end": i * 5.0 + 15.0, "wpm": w}
+                for i, w in enumerate(wpm_list)
+            ]
+        },
+        "long_pauses": [],
+        "filler_words": [],
+        "repetitions": [],
+    }
+
+
+def test_energy_curve_rewards_late_peak():
+    # Energy building to a crest at 70% position scores high
+    wpm = [120, 125, 130, 150, 165, 160, 155]
+    result = analyze_energy_curve(_speech_with_windows(wpm))
+    assert result is not None
+    assert result["peak_placement_score"] > 80
+    assert "well placed" in result["verdict"] or "hold the build" in result["verdict"]
+
+
+def test_energy_curve_penalizes_front_loading():
+    wpm = [170, 165, 140, 120, 110, 105, 100]
+    result = analyze_energy_curve(_speech_with_windows(wpm))
+    assert result["peak_placement_score"] < 40
+    assert "front-loaded" in result["verdict"]
+
+
+def test_energy_curve_flat_delivery_is_neutral():
+    wpm = [140, 140, 141, 140, 140, 140]
+    result = analyze_energy_curve(_speech_with_windows(wpm))
+    assert result["peak_placement_score"] == 50.0
+    assert "flat" in result["verdict"]
+
+
+def test_rhythm_entropy_detects_monotone_delivery():
+    # Constant pace -> zero alternation -> low rhythm score
+    result = analyze_rhythm_entropy(_speech_with_windows([140] * 10))
+    assert result["rhythm_score"] < 40
+    assert "monotone" in result["verdict"]
+
+
+def test_rhythm_entropy_rewards_varied_delivery():
+    # Alternating speech and breath stretches -> healthy variety
+    wpm = [150, 150, 60, 145, 150, 55, 148, 150, 62, 150]
+    result = analyze_rhythm_entropy(_speech_with_windows(wpm))
+    assert result["rhythm_score"] > result["normalized_entropy"] * 0  # smoke
+    assert result["normalized_entropy"] > 0.3
+    assert result["rhythm_score"] > 55
+
+
+def test_delivery_dynamics_empty_for_missing_speech():
+    assert compute_delivery_dynamics(None) == {}
+    assert compute_delivery_dynamics({}) == {}
+
+
+def test_delivery_dynamics_full_pipeline_shape():
+    speech = _speech_with_windows([120, 130, 150, 165, 158, 150, 140])
+    speech["long_pauses"] = [{"start_time": 30.0, "end_time": 34.0, "duration": 4.0}]
+    speech["filler_words"] = [{"word": "um", "timestamp": 10.0}]
+    out = compute_delivery_dynamics(speech)
+    assert "overall" in out and "parts" in out
+    assert 0 <= out["overall"] <= 100
+    names = {p["name"] for p in out["parts"]}
+    assert "Energy curve" in names and "Rhythm variety" in names
+    assert out["momentum_recovery"] is not None
+    assert out["momentum_recovery"]["recoveries"][0]["ratio"] > 0

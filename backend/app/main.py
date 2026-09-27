@@ -5,12 +5,14 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 import threading
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.db.database import Database
+from app.middleware import RateLimiterMiddleware, SecurityHeadersMiddleware
 from app.routers import fusion, sessions, speech_analysis, upload, visual_analysis
 from app.services.retention import start_retention_scheduler, stop_retention_scheduler
 
@@ -86,6 +88,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimiterMiddleware)
+# Compress JSON report payloads (history lists, fusion reports) in transit.
+from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 # Enable CORS for React frontend (origins configurable via CORS_ALLOW_ORIGINS)
 _origins = [o.strip() for o in settings.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
@@ -110,6 +118,31 @@ app.include_router(fusion.router)
 # Media streaming (session video with HTTP range support)
 from app.routers import media as media_router  # noqa: E402
 app.include_router(media_router.router)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Log the full traceback server-side; return a generic 500 to clients."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error."},
+    )
+
+
+@app.get("/health", tags=["System"])
+async def health():
+    """Liveness probe for load balancers and uptime monitors."""
+    return {"status": "ok", "app": "SmartSpeak API"}
+
+
+@app.get("/version", tags=["System"])
+async def version():
+    """Build/version information for deployment verification."""
+    return {
+        "app": "SmartSpeak API",
+        "version": "1.0.0",
+    }
 
 
 @app.get("/")

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Video, VideoOff, Volume2, VolumeX, Play, Pause } from 'lucide-react';
+import { apiFetch } from '../api/client';
 
 /**
  * Report video: a provider that owns the <video> element reference and
@@ -42,9 +43,7 @@ export function ReportVideoProvider({ sessionId, children }) {
     setVideoSrc(null);
     (async () => {
       try {
-        const res = await fetch(`/api/v1/sessions/${sessionId}/video/status`);
-        if (!res.ok) throw new Error(`status ${res.status}`);
-        const data = await res.json();
+        const data = await apiFetch(`/api/v1/sessions/${sessionId}/video/status`);
         if (cancelled) return;
         if (data.available && data.url) {
           setVideoSrc(data.url);

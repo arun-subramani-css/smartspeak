@@ -100,17 +100,16 @@ export function TimelineChart({ speechAnalysis, visualAnalysis, fusionReport, on
 
     return {
       duration, windowed, pauses, fillers, reps, eyeRanges, postureRanges,
-      headTicks, gestureRanges, mistakes, maxWpm, innerW, lanes, bandStart, totalH,
+      headTicks, gestureRanges, mistakes, innerW, lanes, bandStart, totalH,
       x, yWpm,
     };
   }, [speechAnalysis, visualAnalysis, fusionReport]);
 
   const isVisible = (key) => !hidden.has(key);
-  const show = (...keys) => keys.some(isVisible);
 
   const {
     duration, windowed, pauses, fillers, reps, eyeRanges, postureRanges,
-    headTicks, gestureRanges, mistakes, maxWpm, innerW, lanes, bandStart, totalH,
+    headTicks, gestureRanges, mistakes, innerW, lanes, bandStart, totalH,
     x, yWpm,
   } = data;
 

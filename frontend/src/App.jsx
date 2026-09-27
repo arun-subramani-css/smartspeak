@@ -6,6 +6,7 @@ import { RecentReports } from './components/RecentReports';
 import { ScoreTrendChart } from './components/ScoreTrendChart';
 import { SessionCompare } from './components/SessionCompare';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { apiFetch } from './api/client';
 import { Sparkles, Check } from 'lucide-react';
 
 export default function App() {
@@ -45,9 +46,7 @@ export default function App() {
   // switches to the landing view where the comparison renders.
   const handleCompareWithPrevious = async () => {
     try {
-      const res = await fetch('/api/v1/sessions/history?limit=25&completed_only=true');
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await apiFetch('/api/v1/sessions/history?limit=25&completed_only=true');
       const list = data.sessions || [];
       const idx = list.findIndex((s) => s.session_id === currentSessionId);
       if (idx >= 0 && idx + 1 < list.length) {

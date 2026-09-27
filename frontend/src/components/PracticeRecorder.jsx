@@ -107,7 +107,7 @@ export function PracticeRecorder({ onRecordingReady, onCancel }) {
     } catch {
       try {
         recorder = new MediaRecorder(stream); // fall back to browser default
-      } catch (e2) {
+      } catch (_e2) {
         showError('Recording isn\'t supported in this browser. Try Chrome, Edge, or Firefox.');
         return;
       }

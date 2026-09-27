@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { MessageSquare, MousePointerClick } from 'lucide-react';
+import { MousePointerClick } from 'lucide-react';
 import { useReportVideo } from './ReportVideoPlayer';
 
 /**
@@ -57,7 +57,8 @@ function matchTimestampToWordIndex(words, timestamp) {
 
 export function InteractiveTranscript({ speechAnalysis }) {
   const { seekTo, hasVideo } = useReportVideo();
-  const sa = speechAnalysis || {};
+  // Stable identity so the model useMemo below doesn't invalidate every render.
+  const sa = useMemo(() => speechAnalysis || {}, [speechAnalysis]);
 
   const model = useMemo(() => {
     const transcript = String(sa.transcript_text || '');
@@ -126,7 +127,7 @@ export function InteractiveTranscript({ speechAnalysis }) {
     </p>
   ) : null;
 
-  const handleSeek = (t, label) => {
+  const handleSeek = (t, _label) => {
     if (hasVideo) seekTo(Math.max(0, Number(t) || 0));
   };
 

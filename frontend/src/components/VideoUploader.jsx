@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileVideo, AlertCircle, Shield, Film, Waves, CheckCircle2, X, Loader2, ArrowRight, Video } from 'lucide-react';
+import { Upload, FileVideo, AlertCircle, Shield, Film, Waves, X, Loader2, ArrowRight, Video } from 'lucide-react';
 import { PracticeRecorder } from './PracticeRecorder';
 
 const MAX_SIZE_MB = 500;
@@ -107,14 +107,14 @@ export function VideoUploader({ onUploadSuccess }) {
           if (onUploadSuccess) {
             onUploadSuccess(response.session_id);
           }
-        } catch (e) {
+        } catch (_e) {
           setErrorMessage('Upload completed, but server returned an invalid response.');
         }
       } else {
         try {
           const res = JSON.parse(xhr.responseText);
           setErrorMessage(res.detail || `Upload rejected (HTTP ${xhr.status})`);
-        } catch (e) {
+        } catch (_e) {
           setErrorMessage(`Upload failed with status code ${xhr.status}`);
         }
       }

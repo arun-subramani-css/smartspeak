@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   GitCompare, TrendingUp, TrendingDown, Minus, X, Crosshair, CheckCircle2, ArrowRight, AlertTriangle,
 } from 'lucide-react';
+import { apiFetch } from '../api/client';
 
 /**
  * SessionCompare — side-by-side comparison of two completed sessions.
@@ -69,9 +70,7 @@ export function SessionCompare({ olderId, newerId, onOpenSession, onClose }) {
     setError('');
     (async () => {
       try {
-        const res = await fetch(`/api/v1/sessions/compare?older=${encodeURIComponent(olderId)}&newer=${encodeURIComponent(newerId)}`);
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.detail || `Comparison failed (HTTP ${res.status})`);
+        const body = await apiFetch(`/api/v1/sessions/compare?older=${encodeURIComponent(olderId)}&newer=${encodeURIComponent(newerId)}`);
         if (!cancelled) setData(body);
       } catch (e) {
         if (!cancelled) setError(e.message || 'Could not load the comparison.');

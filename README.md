@@ -1,8 +1,11 @@
 # SmartSpeak — AI Public Speaking Coach
 
+[![CI](https://github.com/arun-subramani-css/smartspeak/actions/workflows/ci.yml/badge.svg)](https://github.com/arun-subramani-css/smartspeak/actions/workflows/ci.yml)
+
 Upload a recording of a speech and get a full coaching report: pacing, filler words, long pauses,
 repetitions, eye contact, posture, hand gestures, head movement — plus a fusion engine that
-correlates what you said with what your body was doing.
+correlates what you said with what your body was doing, and **Delivery Dynamics**: energy-curve
+peak placement, rhythm-entropy variety, and momentum recovery after pauses.
 
 ## How it works
 
@@ -67,12 +70,18 @@ upload doesn't pay load latency.
 
 See `backend/.env.example` and `frontend/.env.example` for the full list.
 
-## Testing
+## Testing & quality
 
 ```bash
-cd backend  && python -m pytest tests/ -q   # 47 tests — pipeline, fusion, analyzers, confidence
-cd frontend && npm test                     # 12 tests — TimelineChart + RecentReports (vitest)
+cd backend  && python -m pytest tests/ -q   # 66 tests — pipeline, fusion, dynamics, analyzers
+cd frontend && npm run lint                 # ESLint 9 (React hooks + strict rules)
+cd frontend && npm test                     # 28 tests — component render coverage (vitest)
 ```
+
+CI (`.github/workflows/ci.yml`) runs backend pytest and frontend lint + vitest + build on every
+push and PR to `main`. The frontend API layer is centralized in `frontend/src/api/client.js`
+(timeouts + normalized errors); the backend ships security headers and per-IP upload rate
+limiting via `backend/app/middleware.py`.
 
 ## Project layout
 

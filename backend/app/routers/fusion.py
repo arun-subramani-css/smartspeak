@@ -12,6 +12,7 @@ from app.services.fusion_engine import (
     process_fusion_session,
 )
 from app.services.improvement_plan import compute_improvement_plan, pick_focus_goal
+from app.services.delivery_dynamics import compute_delivery_dynamics
 
 logger = logging.getLogger(__name__)
 
@@ -36,22 +37,27 @@ async def get_fusion_report(session_id: str, recompute: bool = False):
     if fusion_data and not recompute:
         # Backfill improvement_plan for reports stored before the plan existed,
         # preserving the original scores and grafting only the new fields.
+        grafts = {}
         if "improvement_plan" not in fusion_data and (
             session.get("speech_analysis") is not None or session.get("visual_analysis") is not None
         ):
             try:
                 plan = compute_improvement_plan(session.get("speech_analysis"), session.get("visual_analysis"))
-                fusion_data = {
-                    **fusion_data,
-                    "improvement_plan": [a.model_dump(mode="json") for a in plan],
-                    "focus_goal": pick_focus_goal(plan),
-                }
-                await sessions_col.update_one(
-                    {"session_id": session_id},
-                    {"$set": {"fusion_report": fusion_data}}
-                )
+                grafts["improvement_plan"] = [a.model_dump(mode="json") for a in plan]
+                grafts["focus_goal"] = pick_focus_goal(plan)
             except Exception as exc:
                 logger.warning(f"Failed to backfill improvement plan for '{session_id}': {exc}")
+        if "delivery_dynamics" not in fusion_data and session.get("speech_analysis"):
+            try:
+                grafts["delivery_dynamics"] = compute_delivery_dynamics(session.get("speech_analysis"))
+            except Exception as exc:
+                logger.warning(f"Failed to backfill delivery dynamics for '{session_id}': {exc}")
+        if grafts:
+            fusion_data = {**fusion_data, **grafts}
+            await sessions_col.update_one(
+                {"session_id": session_id},
+                {"$set": {"fusion_report": fusion_data}}
+            )
 
         return FusionReportResponse(
             session_id=session["session_id"],

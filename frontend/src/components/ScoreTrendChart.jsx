@@ -1,12 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { LineChart, TrendingUp } from 'lucide-react';
-
-function scoreColor(v) {
-  if (v == null) return '#64748b';
-  if (v >= 70) return '#10b981';
-  if (v >= 40) return '#f59e0b';
-  return '#ef4444';
-}
+import { apiFetch } from '../api/client';
 
 const METRICS = [
   { key: 'smartspeak_index', label: 'SmartSpeak Score', color: '#7c3aed' },
@@ -32,9 +26,7 @@ export function ScoreTrendChart() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/v1/sessions/history?limit=12&completed_only=true');
-        if (!res.ok) throw new Error(`history request failed (${res.status})`);
-        const data = await res.json();
+        const data = await apiFetch('/api/v1/sessions/history?limit=12&completed_only=true');
         if (!cancelled) setSessions((data.sessions || []).slice().reverse()); // oldest → newest
       } catch {
         if (!cancelled) setSessions([]); // hide silently when unreachable

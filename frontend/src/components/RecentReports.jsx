@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { History, ChevronRight, TrendingUp, TrendingDown, Minus, GitCompare } from 'lucide-react';
+import { apiFetch } from '../api/client';
 
 const GRADE_COLORS = {
   Executive: '#10b981',
@@ -58,9 +59,7 @@ export function RecentReports({ onOpenSession, onCompareSession }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/v1/sessions/history?limit=8&completed_only=true');
-        if (!res.ok) throw new Error(`history request failed (${res.status})`);
-        const data = await res.json();
+        const data = await apiFetch('/api/v1/sessions/history?limit=8&completed_only=true');
         if (!cancelled) setSessions(data.sessions || []);
       } catch (e) {
         console.error('Failed to load session history:', e);
