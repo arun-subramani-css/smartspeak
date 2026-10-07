@@ -42,3 +42,23 @@ Thumbs.db
 .freebuff/
 backend_server.log
 frontend_server.log
+
+# Unrelated CDR / vector-tracing leftovers (removed 2026-09-29) — keep out of SmartSpeak
+*.cdr
+*.vbs
+make_cdr*
+trace_vector2.py
+verify_cdr*
+verify_*.png
+Vector Studio.html
+app_template.html
+final_compare.html
+pdf_check.html
+pdf_render.png
+imagetracer.js
+potrace.js
+original.png
+start_helper.bat
+
+# Local archives too large for GitHub (GitHub rejects files >100 MB)
+smart speak.rar
