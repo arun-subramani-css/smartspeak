@@ -225,6 +225,18 @@ class MistakeItem(BaseModel):
     events: list[str] | None = None
 
 
+class RewriteItem(BaseModel):
+    """AI-suggested fluent rewrite of one flagged speech segment.
+
+    The original transcript is never modified — this is a suggestion stored
+    alongside it in fusion_report.rewrites.
+    """
+    original_segment: str
+    rewritten_segment: str
+    mistake_type: str  # "filler_word" | "repetition"
+    timestamp: float   # matches the timestamp of the originating mistake
+
+
 class ImprovementAction(BaseModel):
     """One prioritized coaching action derived from the session's real numbers."""
     metric: str          # "wpm", "fillers", "pauses", "repetitions", "eye_contact", "posture", "gestures", "head_movement"
@@ -249,6 +261,9 @@ class FusionReportResult(BaseModel):
     # Higher-order delivery metrics: energy-curve peak placement, rhythm
     # entropy, momentum recovery after pauses. Empty for legacy/short sessions.
     delivery_dynamics: dict = {}
+    # AI-suggested fluent rewrites of flagged speech segments (fillers,
+    # repetitions). Empty when the rewrite model is unavailable or disabled.
+    rewrites: list[RewriteItem] = []
     analyzed_at: datetime
 
 

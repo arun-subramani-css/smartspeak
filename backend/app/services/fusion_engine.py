@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -70,6 +71,7 @@ from app.models.session import (
 )
 from app.services.improvement_plan import compute_improvement_plan, pick_focus_goal
 from app.services.delivery_dynamics import compute_delivery_dynamics
+from app.services.rewrite_engine import generate_rewrites
 
 logger = logging.getLogger("smartspeak.fusion_engine")
 
@@ -685,6 +687,14 @@ def generate_fusion_report_sync(
     focus_goal = pick_focus_goal(improvement_plan)
     delivery_dynamics = compute_delivery_dynamics(speech_analysis)
 
+    # AI rewrites of flagged speech segments. Purely additive and failure-safe:
+    # any problem here degrades to an empty list, never a failed report.
+    rewrites = []
+    try:
+        rewrites = generate_rewrites(speech_analysis, mistakes)
+    except Exception as exc:
+        logger.warning(f"Rewrite generation failed; continuing without rewrites: {exc}")
+
     return FusionReportResult(
         mistakes=mistakes,
         smartspeak_index=scores["smartspeak_index"],
@@ -697,6 +707,7 @@ def generate_fusion_report_sync(
         focus_goal=focus_goal,
         previous_focus_goal=previous_focus_goal,
         delivery_dynamics=delivery_dynamics,
+        rewrites=rewrites,
         analyzed_at=datetime.now(timezone.utc)
     )
 
@@ -723,7 +734,11 @@ async def process_fusion_session(session_id: str) -> bool:
         # show progress against it.
         previous_focus_goal = await get_previous_focus_goal(sessions_col, session_id)
 
-        fusion_result = generate_fusion_report_sync(
+        # CPU-bound (scoring, and now T5 rewrite inference): MUST run off the
+        # event loop or every concurrent request (status polling, video
+        # streaming) freezes for the duration of fusion.
+        fusion_result = await asyncio.to_thread(
+            generate_fusion_report_sync,
             speech_analysis, visual_analysis, confidence_analysis,
             previous_focus_goal=previous_focus_goal,
         )

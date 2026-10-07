@@ -63,19 +63,58 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
     Applies to POST /api/v1/upload (each request consumes minutes of CPU).
     GETs are cheap and stay unlimited; global limits belong at the reverse
     proxy once one exists.
+
+    Memory: stale per-IP windows are pruned opportunistically and the map is
+    hard-capped (oldest activity evicted) so a flood of spoofed/unique IPs
+    cannot grow it without bound.
+
+    Identity: X-Forwarded-For is only honored when TRUST_X_FORWARDED_FOR is
+    enabled (i.e. a trusted reverse proxy actually sits in front). Otherwise
+    the raw socket peer is used, so clients cannot rotate a spoofed header to
+    obtain a fresh rate-limit bucket.
     """
+
+    _MAX_TRACKED_IPS = 10_000
+    _PRUNE_INTERVAL_SECONDS = 600.0
 
     def __init__(self, app):
         super().__init__(app)
         self._hits: dict[str, deque] = defaultdict(deque)
         self._limit = settings.RATE_LIMIT_UPLOAD_PER_HOUR
         self._window = 3600.0
+        self._last_prune = 0.0
 
     def _client_ip(self, request) -> str:
-        fwd = request.headers.get("x-forwarded-for")
-        if fwd:
-            return fwd.split(",")[0].strip()
+        if settings.TRUST_X_FORWARDED_FOR:
+            fwd = request.headers.get("x-forwarded-for")
+            if fwd:
+                return fwd.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
+
+    def _prune(self, now: float) -> None:
+        """Drop fully-expired and empty entries; hard-cap the map by evicting
+        the least recently active IPs. Called at most every
+        _PRUNE_INTERVAL_SECONDS."""
+        if now - self._last_prune < self._PRUNE_INTERVAL_SECONDS:
+            return
+        self._last_prune = now
+        # An entry whose NEWEST hit is older than the window can never block
+        # anyone again — drop it wholesale (its deque would be emptied by the
+        # window loop only if that IP sent another request).
+        expired = [
+            ip for ip, hits in self._hits.items()
+            if not hits or now - hits[-1] > self._window
+        ]
+        for ip in expired:
+            del self._hits[ip]
+        if len(self._hits) > self._MAX_TRACKED_IPS:
+            # deque is chronological per IP; ordering by last hit approximates
+            # least-recently-active without a second index.
+            by_latest = sorted(
+                self._hits.items(), key=lambda kv: kv[1][-1] if kv[1] else 0.0
+            )
+            for ip, _ in by_latest[: len(self._hits) - self._MAX_TRACKED_IPS]:
+                del self._hits[ip]
 
     async def dispatch(self, request, call_next):
         if request.method == "POST" and request.url.path == "/api/v1/upload":
@@ -92,4 +131,5 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
                     headers={"Retry-After": str(retry_after)},
                 )
             hits.append(now)
+            self._prune(now)
         return await call_next(request)

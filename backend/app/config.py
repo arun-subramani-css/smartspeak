@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     # Upload rate limiting (per client IP, sliding window).
     RATE_LIMIT_UPLOAD_PER_HOUR: int = 20
+    # Only enable when a trusted reverse proxy sets X-Forwarded-For. Off by
+    # default so clients cannot spoof the header to rotate rate-limit buckets.
+    TRUST_X_FORWARDED_FOR: bool = False
 
     # Audio Enhancement for Speech-to-Text Accuracy
     # FFmpeg filter chain applied to the extracted WAV before Whisper runs.
@@ -86,6 +89,18 @@ class Settings(BaseSettings):
     # "openai" (openai-whisper, PyTorch). Falls back to openai-whisper when the
     # faster-whisper package is unavailable.
     WHISPER_ENGINE: str = "faster"
+
+    # AI Rewrite Engine: generates fluent rewrites of flagged speech segments
+    # (filler words, repetitions) with a locally-run T5 grammar-correction
+    # model. Zero API cost and fully offline after a one-time download.
+    REWRITES_ENABLED: bool = True
+    REWRITE_MODEL_NAME: str = "vennify/t5-base-grammar-correction"
+    # Task prefix expected by the chosen checkpoint. Blank it ("") if you swap
+    # to a prefix-free checkpoint such as prithivida/grammar_error_correcter_v1.
+    REWRITE_MODEL_INPUT_PREFIX: str = "grammar: "
+    # Download/load the rewrite model in the startup prewarm thread so the
+    # first fusion report doesn't pay the load latency.
+    REWRITE_PREWARM: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -1,9 +1,11 @@
+import asyncio
 import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from app.db.database import Database
 from app.models.session import (
     FusionReportResponse,
     FusionReportResult,
+    MistakeItem,
     SessionStatus,
 )
 from app.services.fusion_engine import (
@@ -52,6 +54,17 @@ async def get_fusion_report(session_id: str, recompute: bool = False):
                 grafts["delivery_dynamics"] = compute_delivery_dynamics(session.get("speech_analysis"))
             except Exception as exc:
                 logger.warning(f"Failed to backfill delivery dynamics for '{session_id}': {exc}")
+        if "rewrites" not in fusion_data and session.get("speech_analysis"):
+            try:
+                from app.services.rewrite_engine import generate_rewrites
+                mistakes = [MistakeItem(**m) for m in fusion_data.get("mistakes", [])]
+                # T5 inference is seconds of CPU — off the event loop.
+                items = await asyncio.to_thread(
+                    generate_rewrites, session.get("speech_analysis"), mistakes
+                )
+                grafts["rewrites"] = [r.model_dump(mode="json") for r in items]
+            except Exception as exc:
+                logger.warning(f"Failed to backfill rewrites for '{session_id}': {exc}")
         if grafts:
             fusion_data = {**fusion_data, **grafts}
             await sessions_col.update_one(
@@ -75,7 +88,9 @@ async def get_fusion_report(session_id: str, recompute: bool = False):
         # Reports created before improvement_plan existed are lazily backfilled
         # here because generate_fusion_report_sync always computes it.
         previous_focus_goal = await get_previous_focus_goal(sessions_col, session_id)
-        fusion_result = generate_fusion_report_sync(
+        # CPU-bound (scoring + T5 rewrite inference): keep the event loop free.
+        fusion_result = await asyncio.to_thread(
+            generate_fusion_report_sync,
             speech_data, visual_data, conf_data,
             previous_focus_goal=previous_focus_goal,
         )

@@ -12,6 +12,51 @@ import { GitCompare } from 'lucide-react';
 import { apiFetch } from '../api/client';
 import { humanizeMistakeDescription } from './mistakeText';
 
+/**
+ * Suggested rewrite matching — pairs a fusion mistake with its AI rewrite by
+ * timestamp (within tolerance) for speech/compound mistakes only. Returns
+ * null for visual mistakes, long pauses, and when rewrites are absent.
+ */
+const REWRITE_MATCH_TOLERANCE_S = 0.05;
+
+export function rewriteFor(rewrites, mistake) {
+  if (!Array.isArray(rewrites) || rewrites.length === 0) return null;
+  const t = Number(mistake?.timestamp);
+  if (!Number.isFinite(t)) return null;
+  if (mistake?.category !== 'speech' && mistake?.category !== 'compound') return null;
+  return rewrites.find((r) => {
+    const rt = Number(r?.timestamp);
+    return (
+      Number.isFinite(rt) &&
+      Math.abs(rt - t) <= REWRITE_MATCH_TOLERANCE_S &&
+      (r.mistake_type === 'filler_word' || r.mistake_type === 'repetition')
+    );
+  }) || null;
+}
+
+/** Compact original-vs-rewritten callout reusing the report card styling. */
+function RewriteCallout({ rewrite }) {
+  return (
+    <div style={{
+      padding: '8px 12px',
+      borderRadius: '8px',
+      background: 'rgba(16, 185, 129, 0.08)',
+      border: '1px solid rgba(16, 185, 129, 0.35)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, color: '#34d399' }}>
+        <Sparkles size={12} />
+        <span>Suggested rewrite</span>
+      </div>
+      <div style={{ fontSize: '0.8rem', marginTop: '4px', color: 'rgba(255, 255, 255, 0.55)', textDecoration: 'line-through' }}>
+        “{rewrite.original_segment}”
+      </div>
+      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#d1fae5' }}>
+        “{rewrite.rewritten_segment}”
+      </div>
+    </div>
+  );
+}
+
 function scoreColor(v) {
   if (v >= 70) return '#10b981';
   if (v >= 40) return '#f59e0b';
@@ -609,6 +654,16 @@ export function StatusTracker({ sessionId, onReset, onCompareWithPrevious }) {
                           </Seekable>
                       ))}
                     </div>
+                    {/* AI suggested rewrites for the flagged speech moments
+                        above (filler words / repetitions only). */}
+                    {fusionReport.rewrites?.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                        {fusionReport.mistakes.slice(0, 5).map((m, idx) => {
+                          const rewrite = rewriteFor(fusionReport.rewrites, m);
+                          return rewrite ? <RewriteCallout key={`rewrite-${idx}`} rewrite={rewrite} /> : null;
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -61,6 +61,16 @@ async def lifespan(app: FastAPI):
                 get_spacy_nlp()
                 _get_confidence_model()
                 _get_posture_model()
+                # Rewrite model (~900MB one-time download) is fetched/loaded in
+                # this background thread so the first fusion report never pays
+                # the load latency. Its own try/except keeps a rewrite-model
+                # failure from spoiling the Whisper/spaCy/classifier prewarm.
+                from app.services.rewrite_engine import _get_rewrite_model
+                if _s.REWRITES_ENABLED and _s.REWRITE_PREWARM:
+                    try:
+                        _get_rewrite_model()
+                    except Exception as rw_exc:
+                        logger.warning(f"Rewrite model prewarm failed (lazily retried on first use): {rw_exc}")
                 logger.info("Model prewarm complete: Whisper, spaCy, and confidence/posture classifiers are in memory.")
             except Exception as e:
                 logger.warning(f"Model prewarm skipped/failed (first request will load lazily): {e}")

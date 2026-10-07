@@ -9,6 +9,7 @@ import { VideoUploader } from '../components/VideoUploader';
 import { ReportVideoProvider } from '../components/ReportVideoPlayer';
 import { InteractiveTranscript } from '../components/InteractiveTranscript';
 import { humanizeMistakeDescription } from '../components/mistakeText';
+import { StatusTracker, rewriteFor } from '../components/StatusTracker';
 import { fireEvent } from '@testing-library/react';
 
 // ---- Shared fixtures -------------------------------------------------------
@@ -474,5 +475,89 @@ describe('InteractiveTranscript', () => {
     expect(container.querySelectorAll('mark').length).toBeGreaterThan(0);
     expect(container.querySelector('mark')?.getAttribute('title')).toContain('um');
     expect(container.textContent).toContain('um so we did the thing');
+  });
+});
+
+// ---- AI rewrite callouts (StatusTracker) -------------------------------------
+
+describe('rewriteFor matching', () => {
+  it('pairs only speech/compound mistakes with a timestamp-matched rewrite', () => {
+    const rewrites = [
+      { timestamp: 6.2, mistake_type: 'filler_word', original_segment: 'a', rewritten_segment: 'b' },
+    ];
+    expect(rewriteFor(rewrites, { timestamp: 6.2, category: 'speech' })).toBe(rewrites[0]);
+    expect(rewriteFor(rewrites, { timestamp: 6.22, category: 'compound' })).toBe(rewrites[0]);
+    expect(rewriteFor(rewrites, { timestamp: 6.3, category: 'speech' })).toBeNull();
+    expect(rewriteFor(rewrites, { timestamp: 6.2, category: 'visual' })).toBeNull();
+    expect(rewriteFor([], { timestamp: 6.2, category: 'speech' })).toBeNull();
+    expect(rewriteFor(null, { timestamp: 6.2, category: 'speech' })).toBeNull();
+  });
+});
+
+describe('AI rewrite callouts in StatusTracker', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const statusPayload = {
+    status: 'fusion_complete',
+    has_speech_analysis: true,
+    has_visual_analysis: true,
+    has_fusion_report: true,
+  };
+
+  const fusionWithRewrites = {
+    smartspeak_index: 78.4,
+    grade: 'Polished',
+    verbal_score: 80,
+    non_verbal_score: 75,
+    ml_confidence_score: 82,
+    mistakes: [
+      { timestamp: 6.2, category: 'speech', description: "Used filler word 'um'", severity: 'minor', events: ['filler_word: um'] },
+      { timestamp: 12.3, category: 'compound', description: 'Repeated stuff while looking down', severity: 'medium', events: ['repetition: stuff'] },
+      { timestamp: 20, category: 'visual', description: 'Looking away from audience', severity: 'minor', events: ['looking_away'] },
+    ],
+    rewrites: [
+      { original_segment: 'um so i am going there.', rewritten_segment: 'So I am going there.', mistake_type: 'filler_word', timestamp: 6.2 },
+      { original_segment: 'and uh stuff.', rewritten_segment: 'And stuff.', mistake_type: 'repetition', timestamp: 12.3 },
+    ],
+  };
+
+  function mockFetchByPath(payloads) {
+    return vi.fn((url) => {
+      const path = String(url);
+      const key = Object.keys(payloads).find((k) => path.includes(k));
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(key ? payloads[key] : {}) });
+    });
+  }
+
+  it('shows original vs rewritten text under the flagged speech mistakes', async () => {
+    global.fetch = mockFetchByPath({
+      '/status': statusPayload,
+      '/fusion-report': { fusion_report: fusionWithRewrites },
+      '/speech-analysis': { speech_analysis: speechAnalysis },
+      '/visual-analysis': { visual_analysis: visualAnalysis },
+      '/video/status': { available: false },
+    });
+    const { container } = render(<StatusTracker sessionId="t-rewrite" onReset={() => {}} />);
+    expect((await screen.findAllByText('Suggested rewrite')).length).toBeGreaterThan(0);
+    // Original (muted, struck through) vs rewritten (highlighted)
+    expect(container.textContent).toContain('um so i am going there.');
+    expect(container.textContent).toContain('So I am going there.');
+    // Two callouts: the speech + compound mistakes; the visual mistake at 20s has none
+    expect(screen.getAllByText('Suggested rewrite')).toHaveLength(2);
+  });
+
+  it('renders no callout when the report carries no rewrites', async () => {
+    global.fetch = mockFetchByPath({
+      '/status': statusPayload,
+      '/fusion-report': { fusion_report: { ...fusionWithRewrites, rewrites: [] } },
+      '/speech-analysis': { speech_analysis: speechAnalysis },
+      '/visual-analysis': { visual_analysis: visualAnalysis },
+      '/video/status': { available: false },
+    });
+    render(<StatusTracker sessionId="t-rewrite-none" onReset={() => {}} />);
+    expect(await screen.findByText(/Key Behavioral Feedback/)).toBeInTheDocument();
+    expect(screen.queryByText('Suggested rewrite')).not.toBeInTheDocument();
   });
 });
