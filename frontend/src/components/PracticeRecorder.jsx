@@ -32,7 +32,7 @@ function pickMimeType() {
   return '';
 }
 
-export function PracticeRecorder({ onRecordingReady, onCancel }) {
+export function PracticeRecorder({ onRecordingReady, onCancel, onCameraUnavailable }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const recorderRef = useRef(null);
@@ -70,6 +70,7 @@ export function PracticeRecorder({ onRecordingReady, onCancel }) {
     // Unsupported browser checks
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof window.MediaRecorder === 'undefined') {
       setPhase('unsupported');
+      if (onCameraUnavailable) onCameraUnavailable();
       return;
     }
 
@@ -86,8 +87,10 @@ export function PracticeRecorder({ onRecordingReady, onCancel }) {
     } catch (err) {
       if (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || err.name === 'SecurityError')) {
         setPhase('denied');
+        if (onCameraUnavailable) onCameraUnavailable(); // phone panel is the way out
       } else if (err && (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError' || err.name === 'OverconstrainedError')) {
         showError('We couldn\'t find a usable camera or microphone. Connect one (or check it isn\'t disabled) and try again.');
+        if (onCameraUnavailable) onCameraUnavailable();
       } else if (err && (err.name === 'NotReadableError' || err.name === 'TrackStartError')) {
         showError('Your camera is being used by another app. Close it and try again.');
       } else {

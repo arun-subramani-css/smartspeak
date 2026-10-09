@@ -79,6 +79,20 @@ def test_only_upload_post_is_limited(monkeypatch):
     assert drive(mw, make_request(path="/api/v1/sessions/x/fusion-report")).status_code == 200
 
 
+def test_pairing_upload_post_is_limited(monkeypatch):
+    """The phone-pairing upload reuses the same ingest pipeline, so it must
+    share the per-IP upload budget — while status polls stay unlimited."""
+    mw = make_middleware(monkeypatch, limit=1)
+    pairing_upload = "/api/v1/pairing/sometoken/upload"
+    assert drive(mw, make_request(path=pairing_upload)).status_code == 200
+    assert drive(mw, make_request(path=pairing_upload)).status_code == 429
+
+    # GET status polls and pairing create/cancel are cheap — never counted.
+    assert drive(mw, make_request(method="GET", path="/api/v1/pairing/sometoken")).status_code == 200
+    assert drive(mw, make_request(method="POST", path="/api/v1/pairing")).status_code == 200
+    assert drive(mw, make_request(method="DELETE", path="/api/v1/pairing/sometoken")).status_code == 200
+
+
 def test_prune_removes_stale_and_empty_entries(monkeypatch):
     mw = make_middleware(monkeypatch, limit=5)
     mw._hits["gone-empty"] = deque()                      # empty: prunable

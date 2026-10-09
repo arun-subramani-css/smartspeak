@@ -60,9 +60,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 class RateLimiterMiddleware(BaseHTTPMiddleware):
     """Sliding-window per-IP limiter for expensive endpoints.
 
-    Applies to POST /api/v1/upload (each request consumes minutes of CPU).
-    GETs are cheap and stay unlimited; global limits belong at the reverse
-    proxy once one exists.
+    Applies to POST /api/v1/upload and POST /api/v1/pairing/{token}/upload
+    (each request consumes minutes of CPU; the phone-pairing upload reuses
+    the same ingest pipeline). GETs — including pairing status polls — are
+    cheap and stay unlimited; global limits belong at the reverse proxy
+    once one exists.
 
     Memory: stale per-IP windows are pruned opportunistically and the map is
     hard-capped (oldest activity evicted) so a flood of spoofed/unique IPs
@@ -117,7 +119,14 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
                 del self._hits[ip]
 
     async def dispatch(self, request, call_next):
-        if request.method == "POST" and request.url.path == "/api/v1/upload":
+        path = request.url.path
+        # Expensive endpoints: the direct upload plus the phone-pairing
+        # upload (identical pipeline behind a token).
+        is_limited = request.method == "POST" and (
+            path == "/api/v1/upload"
+            or (path.startswith("/api/v1/pairing/") and path.endswith("/upload"))
+        )
+        if is_limited:
             ip = self._client_ip(request)
             now = time.monotonic()
             hits = self._hits[ip]

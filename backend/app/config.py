@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     # default so clients cannot spoof the header to rotate rate-limit buckets.
     TRUST_X_FORWARDED_FOR: bool = False
 
+    # Phone-camera pairing (Practice mode → QR code). Single-use in-memory
+    # tokens; phone_url is built from LAN_BASE_URL when set, otherwise from
+    # an auto-detected LAN IP + FRONTEND_PORT. Localhost is never encoded —
+    # the laptop UI shows a warning when no LAN address exists.
+    PAIRING_TOKEN_TTL_SECONDS: int = 600
+    LAN_BASE_URL: str | None = None  # e.g. http://192.168.1.50:5173
+    FRONTEND_PORT: int = 5173        # Vite dev-server port for the phone URL
+
     # Audio Enhancement for Speech-to-Text Accuracy
     # FFmpeg filter chain applied to the extracted WAV before Whisper runs.
     AUDIO_ENABLE_DENOISE: bool = True

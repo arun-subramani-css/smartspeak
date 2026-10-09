@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
-import { Upload, FileVideo, AlertCircle, Shield, Film, Waves, X, Loader2, ArrowRight, Video } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Upload, FileVideo, AlertCircle, Shield, Film, Waves, X, Loader2, ArrowRight, Video, Smartphone } from 'lucide-react';
 import { PracticeRecorder } from './PracticeRecorder';
+import { PhonePairPanel } from './PhonePairPanel';
 
 const MAX_SIZE_MB = 500;
 const ALLOWED_EXTENSIONS = ['.mp4', '.avi', '.mov', '.webm'];
@@ -12,7 +13,47 @@ export function VideoUploader({ onUploadSuccess }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [mode, setMode] = useState('upload'); // 'upload' | 'practice'
+  // 'Use phone camera' panel — also auto-shown when this machine has no
+  // usable webcam (none detected, insecure origin, or permission denied).
+  const [pairMode, setPairMode] = useState(false);
+  const autoPhoneRef = useRef(false); // one-shot: manual return must stick
   const fileInputRef = useRef(null);
+
+  // Auto-switch to the phone panel when no camera can possibly work here.
+  useEffect(() => {
+    if (mode !== 'practice' || autoPhoneRef.current) return undefined;
+    let cancelled = false;
+    const maybeAutoSwitch = () => {
+      if (cancelled || autoPhoneRef.current) return;
+      autoPhoneRef.current = true;
+      setPairMode(true);
+    };
+    const check = async () => {
+      // Insecure origins (plain-HTTP over the LAN) expose no mediaDevices
+      // at all — in-browser recording is impossible there.
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        maybeAutoSwitch();
+        return;
+      }
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (!cancelled && !devices.some((d) => d.kind === 'videoinput')) {
+          maybeAutoSwitch();
+        }
+      } catch {
+        /* can't enumerate — leave the recorder visible */
+      }
+    };
+    check();
+    return () => { cancelled = true; };
+  }, [mode]);
+
+  const handleCameraUnavailable = () => {
+    // Fires from PracticeRecorder on unsupported/denied/missing camera.
+    if (autoPhoneRef.current) return;
+    autoPhoneRef.current = true;
+    setPairMode(true);
+  };
 
   const validateFile = (file) => {
     if (!file) return 'No file selected.';
@@ -223,18 +264,38 @@ export function VideoUploader({ onUploadSuccess }) {
           style={{ display: 'none' }}
         />
 
-        {/* Practice Mode — record in browser, then reuse the exact upload flow */}
-        {mode === 'practice' && !selectedFile && (
-          <PracticeRecorder
-            onRecordingReady={(file) => {
-              setMode('upload');
-              setSelectedFile(file);
-              setErrorMessage('');
-              handleUpload(file); // straight into the existing flow
-            }}
-            onCancel={() => setMode('upload')}
+        {/* Practice Mode — record in browser (or pair a phone), then reuse
+            the exact upload flow */}
+        {mode === 'practice' && !selectedFile && (pairMode ? (
+          <PhonePairPanel
+            onSessionReady={onUploadSuccess}
+            onCancel={() => setPairMode(false)}
           />
-        )}
+        ) : (
+          <>
+            <PracticeRecorder
+              onRecordingReady={(file) => {
+                setMode('upload');
+                setSelectedFile(file);
+                setErrorMessage('');
+                handleUpload(file); // straight into the existing flow
+              }}
+              onCancel={() => setMode('upload')}
+              onCameraUnavailable={handleCameraUnavailable}
+            />
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn-light"
+                onClick={() => setPairMode(true)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Smartphone size={15} />
+                <span>Use phone camera</span>
+              </button>
+            </div>
+          </>
+        ))}
 
         {/* Dropzone */}
         {mode === 'upload' && !selectedFile && (

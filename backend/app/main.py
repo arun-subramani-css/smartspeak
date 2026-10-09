@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.db.database import Database
 from app.middleware import RateLimiterMiddleware, SecurityHeadersMiddleware
-from app.routers import fusion, sessions, speech_analysis, upload, visual_analysis
+from app.routers import fusion, pairing, sessions, speech_analysis, upload, visual_analysis
 from app.services.retention import start_retention_scheduler, stop_retention_scheduler
 
 # Configure logging
@@ -22,6 +22,14 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("smartspeak")
+
+# Pairing tokens must never appear in logs in full — including uvicorn's
+# access log, which prints raw request paths (status polls carry the token).
+from app.services.pairing import PairingTokenScrubFilter, scrub_tokens_in_text as pairing_scrub  # noqa: E402
+
+for _handler in logging.getLogger("uvicorn").handlers + logging.getLogger("uvicorn.access").handlers:
+    _handler.addFilter(PairingTokenScrubFilter())
+logging.getLogger("uvicorn.access").addFilter(PairingTokenScrubFilter())
 
 
 @asynccontextmanager
@@ -120,6 +128,8 @@ app.mount("/data", StaticFiles(directory=str(settings.base_storage_path)), name=
 
 # Include API routers
 app.include_router(upload.router)
+# Phone-camera pairing (Practice mode QR flow) — reuses upload's ingest path.
+app.include_router(pairing.router)
 app.include_router(sessions.router)
 app.include_router(speech_analysis.router)
 app.include_router(visual_analysis.router)
@@ -133,7 +143,7 @@ app.include_router(media_router.router)
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Log the full traceback server-side; return a generic 500 to clients."""
-    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    logger.exception("Unhandled error on %s %s", request.method, pairing_scrub(request.url.path))
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error."},

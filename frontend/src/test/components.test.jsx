@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TimelineChart } from '../components/TimelineChart';
@@ -11,6 +11,17 @@ import { InteractiveTranscript } from '../components/InteractiveTranscript';
 import { humanizeMistakeDescription } from '../components/mistakeText';
 import { StatusTracker, rewriteFor } from '../components/StatusTracker';
 import { fireEvent } from '@testing-library/react';
+import { PhonePairPanel } from '../components/PhonePairPanel';
+import { PhonePair } from '../components/PhonePair';
+
+// Capture the QR payload so tests can assert on the encoded URL.
+vi.mock('qrcode.react', async () => {
+  const React = await import('react');
+  return {
+    QRCodeSVG: (props) =>
+      React.createElement('svg', { 'data-testid': 'qr-code', 'data-value': props.value }),
+  };
+});
 
 // ---- Shared fixtures -------------------------------------------------------
 
@@ -559,5 +570,194 @@ describe('AI rewrite callouts in StatusTracker', () => {
     render(<StatusTracker sessionId="t-rewrite-none" onReset={() => {}} />);
     expect(await screen.findByText(/Key Behavioral Feedback/)).toBeInTheDocument();
     expect(screen.queryByText('Suggested rewrite')).not.toBeInTheDocument();
+  });
+});
+
+// ---- Phone pairing: laptop QR panel + phone page ---------------------------
+
+const pairFixture = {
+  token: 'tok-abc123',
+  phone_url: 'http://192.168.1.7:5173/pair/tok-abc123',
+  expires_in: 600,
+  status: 'waiting',
+};
+
+/** fetch mock covering POST /api/v1/pairing and GET /api/v1/pairing/{token}.
+ *  `polls` is consumed one entry per status poll; an entry with httpStatus
+ *  simulates an error response, an empty list always answers "waiting". */
+function makePairingFetch({ create = pairFixture, polls = [] } = {}) {
+  let pollCount = 0;
+  return vi.fn((url, init) => {
+    const path = String(url);
+    if (path === '/api/v1/pairing' && init && init.method === 'POST') {
+      return Promise.resolve({ ok: true, status: 201, json: async () => create });
+    }
+    if (path.startsWith('/api/v1/pairing/')) {
+      const next = polls[Math.min(pollCount, Math.max(polls.length - 1, 0))];
+      pollCount += 1;
+      if (next && next.httpStatus) {
+        return Promise.resolve({
+          ok: false,
+          status: next.httpStatus,
+          json: async () => ({ detail: next.detail || 'gone' }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => next || { status: 'waiting' } });
+    }
+    return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+  });
+}
+
+describe('PhonePairPanel (laptop QR panel)', () => {
+  let savedFetch;
+  beforeEach(() => { savedFetch = global.fetch; });
+  afterEach(() => { global.fetch = savedFetch; });
+
+  it('renders a QR code encoding the phone URL that contains the token', async () => {
+    global.fetch = makePairingFetch();
+    render(<PhonePairPanel onSessionReady={() => {}} pollIntervalMs={100000} />);
+    const qr = await screen.findByTestId('qr-code');
+    expect(qr.getAttribute('data-value')).toContain('/pair/tok-abc123');
+    // The URL is also shown as selectable text fallback.
+    expect(screen.getByText(pairFixture.phone_url)).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for your phone/)).toBeInTheDocument();
+  });
+
+  it('hands the session to the report flow when the phone upload lands', async () => {
+    global.fetch = makePairingFetch({
+      polls: [{ status: 'uploaded', session_id: 'sess-42' }],
+    });
+    const onSessionReady = vi.fn();
+    render(<PhonePairPanel onSessionReady={onSessionReady} pollIntervalMs={15} />);
+    await waitFor(() => expect(onSessionReady).toHaveBeenCalledWith('sess-42'));
+    expect(await screen.findByText(/Upload received/)).toBeInTheDocument();
+  });
+
+  it('shows an expired message when the backend rejects the token (410)', async () => {
+    global.fetch = makePairingFetch({ polls: [{ httpStatus: 410, detail: 'expired' }] });
+    render(<PhonePairPanel onSessionReady={() => {}} pollIntervalMs={15} />);
+    expect(await screen.findByText(/This pairing code expired/)).toBeInTheDocument();
+  });
+
+  it('never encodes localhost when no LAN URL exists (no QR, explains why)', async () => {
+    global.fetch = makePairingFetch({ create: { ...pairFixture, phone_url: null } });
+    render(<PhonePairPanel onSessionReady={() => {}} pollIntervalMs={15} />);
+    expect(await screen.findByText(/isn't reachable from your phone/)).toBeInTheDocument();
+    expect(screen.queryByTestId('qr-code')).not.toBeInTheDocument();
+  });
+});
+
+describe('VideoUploader — phone camera fallback', () => {
+  let savedFetch;
+  beforeEach(() => { savedFetch = global.fetch; });
+  afterEach(() => { global.fetch = savedFetch; });
+
+  it('auto-opens the phone pairing panel in Practice mode when no camera exists', async () => {
+    global.fetch = makePairingFetch(); // jsdom has no mediaDevices → auto-switch
+    render(<VideoUploader onUploadSuccess={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: /practice now/i }));
+    expect(await screen.findByText('Practice with your phone')).toBeInTheDocument();
+    const qr = await screen.findByTestId('qr-code');
+    expect(qr.getAttribute('data-value')).toContain('/pair/tok-abc123');
+  });
+
+  it('offers a manual "Use phone camera" button next to the recorder when a camera exists', async () => {
+    const savedMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(),
+        enumerateDevices: vi.fn().mockResolvedValue([{ kind: 'videoinput', deviceId: 'cam1' }]),
+      },
+    });
+    try {
+      global.fetch = makePairingFetch();
+      render(<VideoUploader onUploadSuccess={() => {}} />);
+      await userEvent.click(screen.getByRole('button', { name: /practice now/i }));
+      const pairButton = await screen.findByRole('button', { name: /use phone camera/i });
+      await userEvent.click(pairButton);
+      expect(await screen.findByText('Practice with your phone')).toBeInTheDocument();
+    } finally {
+      if (savedMedia) Object.defineProperty(navigator, 'mediaDevices', savedMedia);
+      else delete navigator.mediaDevices;
+    }
+  });
+});
+
+describe('PhonePair (phone page)', () => {
+  let savedFetch;
+  let savedSecure;
+  let savedMedia;
+  let savedRecorder;
+
+  beforeEach(() => {
+    savedFetch = global.fetch;
+    savedSecure = Object.getOwnPropertyDescriptor(window, 'isSecureContext');
+    savedMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+    savedRecorder = Object.getOwnPropertyDescriptor(window, 'MediaRecorder');
+  });
+
+  afterEach(() => {
+    global.fetch = savedFetch;
+    if (savedSecure) Object.defineProperty(window, 'isSecureContext', savedSecure);
+    else delete window.isSecureContext;
+    if (savedMedia) Object.defineProperty(navigator, 'mediaDevices', savedMedia);
+    else delete navigator.mediaDevices;
+    if (savedRecorder) Object.defineProperty(window, 'MediaRecorder', savedRecorder);
+    else delete window.MediaRecorder;
+  });
+
+  const waitingFetch = () =>
+    vi.fn(() => Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'waiting' }) }));
+
+  it('falls back to the OS camera button when the page is not a secure context', async () => {
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false });
+    // Even with mediaDevices present, a plain-HTTP origin can't use getUserMedia.
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn() },
+    });
+    global.fetch = waitingFetch();
+
+    render(<PhonePair token="tok-abc123" />);
+
+    expect(await screen.findByText('Record with your camera')).toBeInTheDocument();
+    const input = document.getElementById('phone-capture');
+    expect(input).toHaveAttribute('accept', 'video/*');
+    expect(input).toHaveAttribute('capture', 'user');
+  });
+
+  it('uses the in-page recorder when the context is secure and a camera exists', async () => {
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+    const getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [{ stop() {} }] });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    Object.defineProperty(window, 'MediaRecorder', {
+      configurable: true,
+      value: class { static isTypeSupported() { return false; } },
+    });
+    global.fetch = waitingFetch();
+
+    render(<PhonePair token="tok-abc123" />);
+
+    expect(await screen.findByText('Start recording')).toBeInTheDocument();
+    expect(getUserMedia).toHaveBeenCalled();
+    expect(document.getElementById('phone-capture')).toBeNull(); // native input not used
+  });
+
+  it('shows a clear message for an invalid pairing token (404)', async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 404, json: async () => ({ detail: 'unknown pairing code' }) }));
+    render(<PhonePair token="bogus" />);
+    expect(await screen.findByText('This pairing code is no longer valid')).toBeInTheDocument();
+  });
+
+  it('shows a clear message for an expired pairing token (410)', async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 410, json: async () => ({ detail: 'expired' }) }));
+    render(<PhonePair token="tok-abc123" />);
+    expect(await screen.findByText('This pairing code has expired')).toBeInTheDocument();
   });
 });

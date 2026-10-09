@@ -55,6 +55,36 @@ npm run dev
 Models (Whisper, spaCy, MediaPipe, posture classifier) are prewarmed at startup so the first
 upload doesn't pay load latency.
 
+### Phone camera mode (laptops without a webcam)
+
+Practice mode has a **“Use phone camera”** option (it also appears automatically when no camera
+is found). It shows a QR code; scanning it opens a mobile page on your phone that records the
+take and uploads it into the same local analysis pipeline. The laptop then opens the normal
+report automatically.
+
+For the phone to reach the frontend, run both sides on the LAN:
+
+```bash
+cd backend  && uvicorn app.main:app --host 0.0.0.0 --port 8000
+cd frontend && npm run dev        # vite --host, listens on 0.0.0.0:5173
+```
+
+- **Windows firewall**: on first run, accept the prompt for **node.exe** — otherwise the phone
+  can't load the page. The QR uses the LAN URL Vite/Windows report (never `localhost`).
+- **Scan from the URL Vite prints** (`http://192.168.x.x:5173`) if no QR appears — it means no
+  LAN address was detected.
+- **Venue Wi-Fi may block device-to-device traffic** (AP/client isolation). If the phone can't
+  load the page, turn on your **phone's hotspot**, reconnect the laptop to it, and restart the
+  dev server — the QR regenerates with the new address.
+- **Optional HTTPS**: plain-HTTP LAN is not a secure context, so the phone page falls back to a
+  native “Record with your camera” button (OS camera app, no browser permission needed). For an
+  in-browser recorder on the phone, terminate HTTPS in front of Vite (`mkcert` for a trusted
+  local cert, or a tunnel like `ngrok`/`cloudflared`). HTTPS is optional for v1.
+
+Pairing codes are single-use, expire after 10 minutes, and never leave the local network — the
+phone uploads straight to the laptop through the Vite proxy. Override the QR base URL with
+`LAN_BASE_URL` in `backend/.env` when auto-detection picks the wrong interface (e.g. VPN).
+
 ## Configuration (`backend/.env`)
 
 | Variable | Default | Purpose |
@@ -73,9 +103,9 @@ See `backend/.env.example` and `frontend/.env.example` for the full list.
 ## Testing & quality
 
 ```bash
-cd backend  && python -m pytest tests/ -q   # 66 tests — pipeline, fusion, dynamics, analyzers
+cd backend  && python -m pytest tests/ -q   # 107 tests — pipeline, fusion, dynamics, analyzers, pairing
 cd frontend && npm run lint                 # ESLint 9 (React hooks + strict rules)
-cd frontend && npm test                     # 28 tests — component render coverage (vitest)
+cd frontend && npm test                     # 42 tests — component render coverage (vitest)
 ```
 
 CI (`.github/workflows/ci.yml`) runs backend pytest and frontend lint + vitest + build on every
